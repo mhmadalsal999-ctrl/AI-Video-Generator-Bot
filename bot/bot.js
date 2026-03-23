@@ -78,3 +78,4 @@ bot.on('callback_query', async (query) => {
 
 export { bot as telegramBot };
 
+.
