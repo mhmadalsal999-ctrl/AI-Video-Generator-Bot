@@ -1,14 +1,14 @@
 {
-  "name": "telegram-kie-bot",
-  "version": "1.0.0",
-  "description": "Telegram bot for video generation using kie.ai API",
+  "name": "anime-series-bot",
+  "version": "2.0.0",
+  "description": "Telegram bot for AI anime series generation and auto-publishing to YouTube",
   "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js"
   },
-  "keywords": ["telegram", "bot", "kie.ai", "video-generation"],
+  "keywords": ["telegram", "bot", "anime", "ai", "youtube", "automation"],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -21,7 +21,10 @@
     "fluent-ffmpeg": "^2.1.2",
     "ffmpeg-static": "^5.2.0",
     "fs-extra": "^11.2.0",
-    "googleapis": "^128.0.0"
+    "googleapis": "^128.0.0",
+    "node-cron": "^3.0.3",
+    "groq-sdk": "^0.3.3",
+    "form-data": "^4.0.0",
+    "uuid": "^9.0.0"
   }
 }
-
