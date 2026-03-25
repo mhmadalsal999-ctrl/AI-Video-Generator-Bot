@@ -1,8 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { telegramBot } from './bot/bot.js';
-import { callbackRouter } from './routes/callback.js';
+import { bot } from './bot/bot.js';
+import { initCronJobs, setBotInstance } from './services/cronScheduler.js';
+import { cleanupTempFiles } from './services/ffmpegService.js';
+import { logger } from './utils/logger.js';
 
 dotenv.config();
 
@@ -10,77 +12,71 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const CALLBACK_BASE_URL = process.env.CALLBACK_BASE_URL;
 
-// Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging middleware
+// Request logger
 app.use((req, res, next) => {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] ${req.method} ${req.path}`);
+  logger.info('HTTP', `${req.method} ${req.path}`);
   next();
 });
 
-// Health check endpoint
+// Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Webhook endpoint for Telegram
-app.post('/webhook', (req, res) => {
-  try {
-    telegramBot.processUpdate(req.body);
-    res.sendStatus(200);
-  } catch (error) {
-    const timestamp = new Date().toISOString();
-    console.error(`[${timestamp}] Error processing webhook update:`, error);
-    res.sendStatus(200); // Always return 200 to Telegram to avoid retries
-  }
-});
-
-// Callback endpoint for kie.ai
-app.use('/api/callback', callbackRouter);
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  const timestamp = new Date().toISOString();
-  console.error(`[${timestamp}] ERROR:`, err);
-  res.status(500).json({ 
-    error: 'Internal server error',
-    message: err.message 
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    mode: CALLBACK_BASE_URL ? 'webhook' : 'polling'
   });
 });
 
-// Start server and setup webhook if in production
+// Telegram Webhook
+app.post('/webhook', (req, res) => {
+  try {
+    bot.processUpdate(req.body);
+    res.sendStatus(200);
+  } catch (err) {
+    logger.error('WEBHOOK', err.message);
+    res.sendStatus(200); // always 200 to Telegram
+  }
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  logger.error('EXPRESS', err.message);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// Start
 app.listen(PORT, async () => {
-  console.log(`[${new Date().toISOString()}] Server started on port ${PORT}`);
-  
-  // Setup webhook if CALLBACK_BASE_URL is available (production mode)
+  logger.success('SERVER', `Started on port ${PORT}`);
+
+  // Pass bot to cron scheduler for notifications
+  setBotInstance(bot);
+
+  // Setup webhook if production
   if (CALLBACK_BASE_URL) {
     try {
       const webhookUrl = `${CALLBACK_BASE_URL}/webhook`;
-      // Delete existing webhook first to avoid conflicts
-      await telegramBot.deleteWebHook();
-      // Set new webhook
-      await telegramBot.setWebHook(webhookUrl);
-      console.log(`[${new Date().toISOString()}] Webhook set to: ${webhookUrl}`);
-      console.log(`[${new Date().toISOString()}] Bot is running in Webhook mode`);
-    } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error setting webhook:`, error);
-      console.log(`[${new Date().toISOString()}] Bot will continue but may not receive updates`);
+      await bot.deleteWebHook();
+      await bot.setWebHook(webhookUrl);
+      logger.success('SERVER', `Webhook set: ${webhookUrl}`);
+    } catch (err) {
+      logger.error('SERVER', `Webhook setup failed: ${err.message}`);
     }
   } else {
-    console.log(`[${new Date().toISOString()}] Bot is running in Polling mode`);
-    console.log(`[${new Date().toISOString()}] Set CALLBACK_BASE_URL to enable Webhook mode`);
+    logger.info('SERVER', 'Running in polling mode (no CALLBACK_BASE_URL set)');
   }
-  
-  console.log(`[${new Date().toISOString()}] Telegram bot initialized`);
+
+  // Init cron jobs (daily publish + cleanup)
+  initCronJobs();
+
+  // Startup cleanup
+  setTimeout(() => cleanupTempFiles().catch(() => {}), 5000);
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
-  console.log(`[${new Date().toISOString()}] SIGTERM received, shutting down gracefully`);
+  logger.info('SERVER', 'SIGTERM received, shutting down');
   process.exit(0);
 });
-
