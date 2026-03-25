@@ -1,432 +1,256 @@
-/**
- * Database operations for user states and tasks
- */
+import { supabase } from './supabase.js';
 
-/**
- * Get user state from database
- */
-export async function getUserState(supabase, userId) {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Getting user state for user ${userId}`);
-
-  try {
-    const { data, error } = await supabase
-      .from('user_states')
-      .select('*')
-      .eq('user_id', userId.toString())
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') {
-        // No rows returned
-        console.log(`[${timestamp}] No state found for user ${userId}`);
-        return null;
-      }
-      console.error(`[${timestamp}] Error getting user state:`, error);
-      throw error;
-    }
-
-    // Convert database format (snake_case) to code format (camelCase)
-    if (data) {
-      return {
-        userId: data.user_id,
-        state: data.state,
-        videoFileId: data.video_file_id,
-        imageFileId: data.image_file_id,
-        videoUrl: data.video_url,
-        imageUrl: data.image_url,
-        prompt: data.prompt,
-        taskId: data.task_id,
-        currentMessageId: data.current_message_id,
-        youtubeClientSecret: data.youtube_client_secret,
-        youtubeClientId: data.youtube_client_id
-      };
-    }
-
-    return null;
-  } catch (error) {
-    console.error(`[${timestamp}] Error in getUserState:`, error);
-    throw error;
-  }
+// ─────────────────── USER STATES ───────────────────
+export async function getUserState(userId) {
+  const { data, error } = await supabase
+    .from('user_states')
+    .select('*')
+    .eq('user_id', userId.toString())
+    .single();
+  if (error?.code === 'PGRST116') return null;
+  if (error) throw error;
+  return data;
 }
 
-/**
- * Update or create user state
- */
-export async function updateUserState(supabase, userState, userId = null) {
-  const timestamp = new Date().toISOString();
-  
-  // Debug: Log the entire userState object
-  console.log(`[${timestamp}] DEBUG updateUserState - userState object:`, JSON.stringify(userState, null, 2));
-  console.log(`[${timestamp}] DEBUG updateUserState - userId parameter:`, userId);
-  
-  // Ensure userId is set - use parameter if userState.userId is missing
-  let userIdStr = null;
-  
-  if (userState && userState.userId) {
-    userIdStr = userState.userId.toString();
-  } else if (userId) {
-    userIdStr = userId.toString();
-    // Fix userState if userId was provided
-    if (userState) {
-      userState.userId = userIdStr;
-    }
-  }
-  
-  if (!userIdStr) {
-    console.error(`[${timestamp}] ERROR: userState.userId and userId parameter are both missing!`, { userState, userId });
-    throw new Error('userState.userId is required');
-  }
-  
-  console.log(`[${timestamp}] Updating user state for user ${userIdStr}, state: ${userState?.state || 'unknown'}`);
-
-  try {
-    const { data, error } = await supabase
-      .from('user_states')
-      .upsert({
-        user_id: userIdStr,
-        state: userState.state,
-        video_file_id: userState.videoFileId,
-        image_file_id: userState.imageFileId,
-        video_url: userState.videoUrl,
-        image_url: userState.imageUrl,
-        prompt: userState.prompt,
-        task_id: userState.taskId,
-        current_message_id: userState.currentMessageId,
-        youtube_client_secret: userState.youtubeClientSecret,
-        youtube_client_id: userState.youtubeClientId,
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'user_id'
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error(`[${timestamp}] Error updating user state:`, error);
-      throw error;
-    }
-
-    // Convert back to camelCase format
-    if (data) {
-      return {
-        userId: data.user_id,
-        state: data.state,
-        videoFileId: data.video_file_id,
-        imageFileId: data.image_file_id,
-        videoUrl: data.video_url,
-        imageUrl: data.image_url,
-        prompt: data.prompt,
-        taskId: data.task_id,
-        currentMessageId: data.current_message_id,
-        youtubeClientSecret: data.youtube_client_secret,
-        youtubeClientId: data.youtube_client_id
-      };
-    }
-
-    return null;
-  } catch (error) {
-    console.error(`[${timestamp}] Error in updateUserState:`, error);
-    throw error;
-  }
+export async function setUserState(userId, state, tempData = {}) {
+  const { data, error } = await supabase
+    .from('user_states')
+    .upsert({
+      user_id: userId.toString(),
+      state,
+      temp_data: tempData,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
 }
 
-/**
- * Create a new task record
- */
-export async function createUserTask(supabase, userId, chatId, taskId, loadingMessageId = null) {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Creating task record: ${taskId} for user ${userId}`);
+export async function getTempData(userId) {
+  const state = await getUserState(userId);
+  return state?.temp_data || {};
+}
 
-  try {
-    const taskData = {
+export async function updateTempData(userId, newData) {
+  const existing = await getTempData(userId);
+  const merged = { ...existing, ...newData };
+  const state = await getUserState(userId);
+  await setUserState(userId, state?.state || 'idle', merged);
+  return merged;
+}
+
+// ─────────────────── SERIES ───────────────────
+export async function createSeries(userId, data) {
+  const { data: series, error } = await supabase
+    .from('series')
+    .insert({
+      user_id: userId.toString(),
+      title: data.title,
+      genre: data.genre,
+      description: data.description || '',
+      characters: data.characters || [],
+      full_scenario: data.full_scenario || '',
+      total_episodes: data.total_episodes || 10,
+      current_episode: 0,
+      status: 'active',
+      voice_id: data.voice_id || null,
+      style: data.style || 'anime',
+      language: data.language || 'ar'
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return series;
+}
+
+export async function getUserSeries(userId, limit = 10) {
+  const { data, error } = await supabase
+    .from('series')
+    .select('*')
+    .eq('user_id', userId.toString())
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getSeriesById(seriesId) {
+  const { data, error } = await supabase
+    .from('series')
+    .select('*')
+    .eq('id', seriesId)
+    .single();
+  if (error?.code === 'PGRST116') return null;
+  if (error) throw error;
+  return data;
+}
+
+export async function updateSeries(seriesId, updates) {
+  const { data, error } = await supabase
+    .from('series')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', seriesId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getAllActiveSeries() {
+  const { data, error } = await supabase
+    .from('series')
+    .select('*')
+    .eq('status', 'active')
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+// ─────────────────── EPISODES ───────────────────
+export async function createEpisode(seriesId, userId, episodeNumber, scenario, title = null) {
+  const { data, error } = await supabase
+    .from('episodes')
+    .insert({
+      series_id: seriesId,
+      user_id: userId.toString(),
+      episode_number: episodeNumber,
+      title: title || `الحلقة ${episodeNumber}`,
+      scenario,
+      status: 'pending'
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getEpisode(episodeId) {
+  const { data, error } = await supabase
+    .from('episodes')
+    .select('*, series(*)')
+    .eq('id', episodeId)
+    .single();
+  if (error?.code === 'PGRST116') return null;
+  if (error) throw error;
+  return data;
+}
+
+export async function getNextPendingEpisode(seriesId) {
+  const { data, error } = await supabase
+    .from('episodes')
+    .select('*')
+    .eq('series_id', seriesId)
+    .eq('status', 'pending')
+    .order('episode_number', { ascending: true })
+    .limit(1)
+    .single();
+  if (error?.code === 'PGRST116') return null;
+  if (error) throw error;
+  return data;
+}
+
+export async function updateEpisode(episodeId, updates) {
+  const { data, error } = await supabase
+    .from('episodes')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', episodeId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getSeriesEpisodes(seriesId) {
+  const { data, error } = await supabase
+    .from('episodes')
+    .select('*')
+    .eq('series_id', seriesId)
+    .order('episode_number', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+// ─────────────────── YOUTUBE ───────────────────
+export async function getYouTubeChannel(userId) {
+  const { data, error } = await supabase
+    .from('youtube_channels')
+    .select('*')
+    .eq('user_id', userId.toString())
+    .eq('is_active', true)
+    .single();
+  if (error?.code === 'PGRST116') return null;
+  if (error) throw error;
+  return data;
+}
+
+export async function saveYouTubeChannel(userId, clientId, clientSecret, refreshToken, channelId, channelTitle) {
+  const { data, error } = await supabase
+    .from('youtube_channels')
+    .upsert({
+      user_id: userId.toString(),
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      channel_id: channelId,
+      channel_title: channelTitle,
+      is_active: true,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// ─────────────────── GENERATION TASKS ───────────────────
+export async function createGenerationTask(episodeId, userId, chatId, type = 'video') {
+  const { data, error } = await supabase
+    .from('generation_tasks')
+    .insert({
+      episode_id: episodeId,
       user_id: userId.toString(),
       chat_id: chatId.toString(),
-      task_id: taskId,
-      state: 'waiting',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-
-    // Store loading message ID in result_json temporarily (we'll use it in callback)
-    if (loadingMessageId) {
-      taskData.result_json = JSON.stringify({ loadingMessageId });
-    }
-
-    const { data, error } = await supabase
-      .from('user_tasks')
-      .insert(taskData)
-      .select()
-      .single();
-
-    if (error) {
-      console.error(`[${timestamp}] Error creating task:`, error);
-      throw error;
-    }
-
-    return data;
-  } catch (error) {
-    console.error(`[${timestamp}] Error in createUserTask:`, error);
-    throw error;
-  }
+      type,
+      status: 'pending'
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
 }
 
-/**
- * Update task loading message ID
- */
-export async function updateTaskLoadingMessage(supabase, taskId, loadingMessageId) {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Updating loading message for task ${taskId}`);
-
-  try {
-    const { data, error } = await supabase
-      .from('user_tasks')
-      .update({
-        result_json: JSON.stringify({ loadingMessageId }),
-        updated_at: new Date().toISOString()
-      })
-      .eq('task_id', taskId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error(`[${timestamp}] Error updating task loading message:`, error);
-      throw error;
-    }
-
-    return data;
-  } catch (error) {
-    console.error(`[${timestamp}] Error in updateTaskLoadingMessage:`, error);
-    throw error;
-  }
+export async function getTaskByExternalId(externalTaskId) {
+  const { data, error } = await supabase
+    .from('generation_tasks')
+    .select('*, episodes(*, series(*))')
+    .eq('external_task_id', externalTaskId)
+    .single();
+  if (error?.code === 'PGRST116') return null;
+  if (error) throw error;
+  return data;
 }
 
-/**
- * Get YouTube channel configuration for user
- */
-export async function getYouTubeChannel(supabase, userId) {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Getting YouTube channel for user ${userId}`);
-
-  try {
-    const { data, error } = await supabase
-      .from('youtube_channels')
-      .select('*')
-      .eq('user_id', userId.toString())
-      .eq('is_active', true)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') {
-        console.log(`[${timestamp}] No YouTube channel found for user ${userId}`);
-        return null;
-      }
-      console.error(`[${timestamp}] Error getting YouTube channel:`, error);
-      throw error;
-    }
-
-    return data;
-  } catch (error) {
-    console.error(`[${timestamp}] Error in getYouTubeChannel:`, error);
-    throw error;
-  }
+export async function updateGenerationTask(taskId, updates) {
+  const { data, error } = await supabase
+    .from('generation_tasks')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', taskId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
 }
 
-/**
- * Save or update YouTube channel configuration
- */
-export async function saveYouTubeChannel(supabase, userId, clientSecret, clientId, refreshToken, channelId = null, channelTitle = null) {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Saving YouTube channel for user ${userId}`);
-
-  try {
-    const { data, error } = await supabase
-      .from('youtube_channels')
-      .upsert({
-        user_id: userId.toString(),
-        client_secret: clientSecret,
-        client_id: clientId,
-        refresh_token: refreshToken,
-        channel_id: channelId,
-        channel_title: channelTitle,
-        is_active: true,
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'user_id'
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error(`[${timestamp}] Error saving YouTube channel:`, error);
-      throw error;
-    }
-
-    return data;
-  } catch (error) {
-    console.error(`[${timestamp}] Error in saveYouTubeChannel:`, error);
-    throw error;
-  }
+// ─────────────────── AUTO PUBLISH LOG ───────────────────
+export async function logAutoPublish(userId, seriesId, episodeId, action, status, details = {}) {
+  await supabase.from('auto_publish_log').insert({
+    user_id: userId.toString(),
+    series_id: seriesId,
+    episode_id: episodeId,
+    action,
+    status,
+    details
+  });
 }
-
-/**
- * Create YouTube upload record
- */
-export async function createYouTubeUpload(supabase, userId, taskId, videoUrl) {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Creating YouTube upload record for task ${taskId}`);
-
-  try {
-    const { data, error } = await supabase
-      .from('youtube_uploads')
-      .insert({
-        user_id: userId.toString(),
-        task_id: taskId,
-        video_url: videoUrl,
-        upload_status: 'pending',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error(`[${timestamp}] Error creating YouTube upload:`, error);
-      throw error;
-    }
-
-    return data;
-  } catch (error) {
-    console.error(`[${timestamp}] Error in createYouTubeUpload:`, error);
-    throw error;
-  }
-}
-
-/**
- * Update YouTube upload status
- */
-export async function updateYouTubeUpload(supabase, uploadId, status, youtubeVideoId = null, youtubeVideoUrl = null, errorMessage = null) {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Updating YouTube upload ${uploadId} status to ${status}`);
-
-  try {
-    const updateData = {
-      upload_status: status,
-      updated_at: new Date().toISOString()
-    };
-
-    if (youtubeVideoId) updateData.youtube_video_id = youtubeVideoId;
-    if (youtubeVideoUrl) updateData.youtube_video_url = youtubeVideoUrl;
-    if (errorMessage) updateData.error_message = errorMessage;
-
-    const { data, error } = await supabase
-      .from('youtube_uploads')
-      .update(updateData)
-      .eq('id', uploadId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error(`[${timestamp}] Error updating YouTube upload:`, error);
-      throw error;
-    }
-
-    return data;
-  } catch (error) {
-    console.error(`[${timestamp}] Error in updateYouTubeUpload:`, error);
-    throw error;
-  }
-}
-
-/**
- * Save generated video to library
- */
-export async function saveGeneratedVideo(supabase, userId, taskId, videoUrl, prompt = null, thumbnailUrl = null) {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Saving generated video to library: taskId ${taskId} for user ${userId}`);
-
-  try {
-    const { data, error } = await supabase
-      .from('generated_videos')
-      .upsert({
-        user_id: userId.toString(),
-        task_id: taskId,
-        video_url: videoUrl,
-        thumbnail_url: thumbnailUrl,
-        prompt: prompt,
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'task_id'
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error(`[${timestamp}] Error saving generated video:`, error);
-      throw error;
-    }
-
-    return data;
-  } catch (error) {
-    console.error(`[${timestamp}] Error in saveGeneratedVideo:`, error);
-    throw error;
-  }
-}
-
-/**
- * Get user's generated videos library
- */
-export async function getUserGeneratedVideos(supabase, userId, limit = 20) {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Getting generated videos for user ${userId}`);
-
-  try {
-    const { data, error } = await supabase
-      .from('generated_videos')
-      .select('*')
-      .eq('user_id', userId.toString())
-      .order('created_at', { ascending: false })
-      .limit(limit);
-
-    if (error) {
-      console.error(`[${timestamp}] Error getting generated videos:`, error);
-      throw error;
-    }
-
-    return data || [];
-  } catch (error) {
-    console.error(`[${timestamp}] Error in getUserGeneratedVideos:`, error);
-    throw error;
-  }
-}
-
-/**
- * Get generated video by task ID
- */
-export async function getGeneratedVideoByTaskId(supabase, taskId) {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Getting generated video by taskId: ${taskId}`);
-
-  try {
-    const { data, error } = await supabase
-      .from('generated_videos')
-      .select('*')
-      .eq('task_id', taskId)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') {
-        console.log(`[${timestamp}] No generated video found for taskId ${taskId}`);
-        return null;
-      }
-      console.error(`[${timestamp}] Error getting generated video:`, error);
-      throw error;
-    }
-
-    return data;
-  } catch (error) {
-    console.error(`[${timestamp}] Error in getGeneratedVideoByTaskId:`, error);
-    throw error;
-  }
-}
-
