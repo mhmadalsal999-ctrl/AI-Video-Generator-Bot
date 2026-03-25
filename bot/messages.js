@@ -1,15 +1,12 @@
-// Reply Keyboard (permanent buttons at bottom)
-export function getMainKeyboard() {
+// ═══════════════ KEYBOARDS ═══════════════
+
+export function mainKeyboard() {
   return {
     reply_markup: {
       keyboard: [
-        [
-          { text: '🎬 بدء توليد فيديو جديد' },
-          { text: '📚 مكتبة الفيديوهات' }
-        ],
-        [
-          { text: '⚙️ إعداد قناة يوتيوب' }
-        ]
+        [{ text: '🎬 إنشاء مسلسل جديد' }, { text: '📺 مسلسلاتي' }],
+        [{ text: '▶️ نشر حلقة الآن' }, { text: '📊 الإحصائيات' }],
+        [{ text: '⚙️ إعدادات يوتيوب' }, { text: '❓ مساعدة' }]
       ],
       resize_keyboard: true,
       one_time_keyboard: false
@@ -17,179 +14,169 @@ export function getMainKeyboard() {
   };
 }
 
-// Welcome message for new users
-export function getWelcomeMessage() {
-  return `👋 مرحباً بك في بوت توليد الفيديوهات بالذكاء الاصطناعي!
-
-🤖 **ما يمكنك فعله:**
-• 🎬 توليد فيديوهات جديدة باستخدام الذكاء الاصطناعي
-• 📚 الوصول إلى مكتبة الفيديوهات المولدة
-• 📺 نشر الفيديوهات على يوتيوب مباشرة
-
-🚀 **كيفية الاستخدام:**
-1. اضغط "🎬 بدء توليد فيديو جديد"
-2. أرسل الفيديو الأساسي
-3. أرسل الصورة
-4. اكتب وصف الفيديو (برومبت)
-5. انتظر حتى يتم توليد الفيديو
-
-💡 **نصيحة:** يمكنك إعداد قناة يوتيوب لنشر الفيديوهات مباشرة!
-
-ابدأ الآن باستخدام الأزرار أدناه 👇`;
+export function cancelKeyboard() {
+  return {
+    reply_markup: {
+      keyboard: [[{ text: '❌ إلغاء' }]],
+      resize_keyboard: true,
+      one_time_keyboard: false
+    }
+  };
 }
 
-export async function sendWelcomeMessage(bot, chatId) {
-  const message = `👋 مرحباً بك في بوت توليد الفيديوهات!
-
-🎬 هذا البوت يساعدك في توليد فيديوهات باستخدام الذكاء الاصطناعي.
-
-📋 الخطوات:
-1️⃣ أرسل الفيديو المرجعي (3-30 ثانية)
-2️⃣ أرسل الصورة المرجعية
-3️⃣ اكتب وصف الفيديو المطلوب (برومبت)
-
-استخدم الأزرار أدناه للبدء 👇`;
-  
-  await bot.sendMessage(chatId, message, getMainKeyboard());
-}
-
-export async function sendVideoRequest(bot, chatId, messageId = null) {
-  const message = `📹 الخطوة 1/3: أرسل الفيديو المرجعي
-
-📌 المتطلبات:
-• المدة: 3-30 ثانية
-• يجب أن يظهر الرأس والكتفين والجذع بوضوح
-• الصيغ المدعومة: MP4, MOV, MKV
-• الحجم الأقصى: 100 MB
-
-يرجى إرسال الفيديو الآن 👇`;
-  
-  if (messageId) {
-    await bot.editMessageText(message, { chat_id: chatId, message_id: messageId });
-  } else {
-    return await bot.sendMessage(chatId, message);
-  }
-}
-
-export async function sendImageRequest(bot, chatId, messageId = null) {
-  const message = `🖼️ الخطوة 2/3: أرسل الصورة المرجعية
-
-📌 المتطلبات:
-• يجب أن تظهر الرأس والكتفين والجذع بوضوح
-• الصيغ المدعومة: JPEG, PNG, WEBP
-• الحجم الأقصى: 10 MB
-
-يرجى إرسال الصورة الآن 👇`;
-  
-  if (messageId) {
-    await bot.editMessageText(message, { chat_id: chatId, message_id: messageId });
-  } else {
-    return await bot.sendMessage(chatId, message);
-  }
-}
-
-export async function sendPromptRequest(bot, chatId, messageId = null) {
-  const message = `✍️ الخطوة 3/3: اكتب وصف الفيديو (برومبت)
-
-📝 اكتب وصفاً نصياً للفيديو الذي تريد توليده.
-مثال: "الشخصية الكرتونية ترقص"
-
-📌 الحد الأقصى: 2500 حرف
-
-يرجى إرسال الوصف الآن 👇`;
-  
-  if (messageId) {
-    await bot.editMessageText(message, { chat_id: chatId, message_id: messageId });
-  } else {
-    return await bot.sendMessage(chatId, message);
-  }
-}
-
-export function getYouTubeUploadKeyboard() {
+export function genreKeyboard() {
   return {
     reply_markup: {
       inline_keyboard: [
         [
-          { text: '📺 انشر الآن على يوتيوب', callback_data: 'upload_youtube' }
+          { text: '👻 رعب', callback_data: 'genre:horror' },
+          { text: '⚔️ أكشن', callback_data: 'genre:action' }
+        ],
+        [
+          { text: '💕 رومانسي', callback_data: 'genre:romance' },
+          { text: '😄 كوميدي', callback_data: 'genre:comedy' }
+        ],
+        [
+          { text: '🧙 خيال وسحر', callback_data: 'genre:fantasy' },
+          { text: '🚀 خيال علمي', callback_data: 'genre:scifi' }
+        ],
+        [
+          { text: '🔥 إثارة', callback_data: 'genre:thriller' },
+          { text: '💔 دراما', callback_data: 'genre:drama' }
         ]
       ]
     }
   };
 }
 
-export async function sendYouTubeSetupStep1(bot, chatId, messageId = null) {
-  const message = `⚙️ إعداد قناة يوتيوب - الخطوة 1/3
-
-🔐 يرجى إرسال Client Secret الخاص بك.
-
-📝 كيفية الحصول على Client Secret:
-1. اذهب إلى Google Cloud Console
-2. اختر مشروعك أو أنشئ مشروع جديد
-3. فعّل YouTube Data API v3
-4. اذهب إلى "Credentials"
-5. أنشئ OAuth 2.0 Client ID (إذا لم يكن موجوداً)
-6. انسخ "Client Secret" وأرسله هنا
-
-يرجى إرسال Client Secret الآن 👇`;
-  
-  if (messageId) {
-    await bot.editMessageText(message, { chat_id: chatId, message_id: messageId });
-  } else {
-    return await bot.sendMessage(chatId, message);
-  }
+export function episodesCountKeyboard() {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '5 حلقات', callback_data: 'episodes:5' },
+          { text: '10 حلقات', callback_data: 'episodes:10' }
+        ],
+        [
+          { text: '15 حلقة', callback_data: 'episodes:15' },
+          { text: '20 حلقة', callback_data: 'episodes:20' }
+        ]
+      ]
+    }
+  };
 }
 
-export async function sendYouTubeSetupStep2(bot, chatId, messageId = null) {
-  const message = `⚙️ إعداد قناة يوتيوب - الخطوة 2/3
-
-🆔 يرجى إرسال Client ID الخاص بك.
-
-📝 كيفية الحصول على Client ID:
-1. في نفس صفحة Credentials في Google Cloud Console
-2. ابحث عن OAuth 2.0 Client ID الذي أنشأته
-3. انسخ "Client ID" وأرسله هنا
-
-يرجى إرسال Client ID الآن 👇`;
-  
-  if (messageId) {
-    await bot.editMessageText(message, { chat_id: chatId, message_id: messageId });
-  } else {
-    return await bot.sendMessage(chatId, message);
-  }
+export function languageKeyboard() {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '🇸🇦 عربي', callback_data: 'lang:ar' },
+          { text: '🇺🇸 English', callback_data: 'lang:en' }
+        ]
+      ]
+    }
+  };
 }
 
-export async function sendYouTubeSetupStep3(bot, chatId, messageId = null) {
-  const message = `⚙️ إعداد قناة يوتيوب - الخطوة 3/3
-
-🔄 يرجى إرسال Refresh Token الخاص بك.
-
-📝 كيفية الحصول على Refresh Token:
-1. استخدم OAuth 2.0 Playground أو أداة مماثلة
-2. اختر YouTube Data API v3
-3. اختر النطاقات المطلوبة (upload, manage)
-4. اكمل عملية المصادقة
-5. انسخ "Refresh Token" وأرسله هنا
-
-يرجى إرسال Refresh Token الآن 👇`;
-  
-  if (messageId) {
-    await bot.editMessageText(message, { chat_id: chatId, message_id: messageId });
-  } else {
-    return await bot.sendMessage(chatId, message);
+export function voiceKeyboard(voices) {
+  const rows = [];
+  for (let i = 0; i < Math.min(voices.length, 5); i += 2) {
+    const row = [{ text: voices[i].name, callback_data: `voice:${voices[i].id}` }];
+    if (voices[i + 1]) row.push({ text: voices[i + 1].name, callback_data: `voice:${voices[i + 1].id}` });
+    rows.push(row);
   }
+  rows.push([{ text: '⏩ تخطي (صوت افتراضي)', callback_data: 'voice:default' }]);
+  return { reply_markup: { inline_keyboard: rows } };
 }
 
-export async function sendYouTubeSetupSuccess(bot, chatId, channelTitle, messageId = null) {
-  const message = `✅ تم إعداد قناة يوتيوب بنجاح!
-
-📺 القناة: ${channelTitle}
-
-يمكنك الآن نشر الفيديوهات على يوتيوب مباشرة من البوت.`;
-  
-  if (messageId) {
-    await bot.editMessageText(message, { chat_id: chatId, message_id: messageId });
-  } else {
-    await bot.sendMessage(chatId, message);
-  }
+export function seriesListKeyboard(seriesList) {
+  const rows = seriesList.map((s, i) => [{
+    text: `${i + 1}. ${s.title} (${s.current_episode}/${s.total_episodes})`,
+    callback_data: `series:${s.id}`
+  }]);
+  rows.push([{ text: '🔙 رجوع', callback_data: 'back:main' }]);
+  return { reply_markup: { inline_keyboard: rows } };
 }
 
+export function seriesActionsKeyboard(seriesId) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '▶️ نشر حلقة الآن', callback_data: `publish_now:${seriesId}` },
+          { text: '📋 عرض الحلقات', callback_data: `episodes_list:${seriesId}` }
+        ],
+        [
+          { text: '🗑️ حذف المسلسل', callback_data: `delete_series:${seriesId}` },
+          { text: '🔙 رجوع', callback_data: 'back:my_series' }
+        ]
+      ]
+    }
+  };
+}
+
+export function confirmKeyboard(action) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '✅ تأكيد', callback_data: `confirm:${action}` },
+          { text: '❌ إلغاء', callback_data: 'cancel:action' }
+        ]
+      ]
+    }
+  };
+}
+
+export function youtubeSetupKeyboard() {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🔑 إعداد يدوي (OAuth)', callback_data: 'yt_setup:manual' }],
+        [{ text: '🔙 رجوع', callback_data: 'back:main' }]
+      ]
+    }
+  };
+}
+
+// ═══════════════ MESSAGES ═══════════════
+
+export const WELCOME_MSG = `🎌 *مرحباً بك في بوت الأنيميشن الذكي!*
+
+أنا قادر على:
+🎬 *توليد مسلسلات أنيميشن كاملة* - سيناريو + فيديو + صوت
+📅 *نشر تلقائي يومي* على يوتيوب
+🎭 *شخصيات ثابتة* في كل حلقة
+🎙️ *تعليق صوتي* بأصوات احترافية
+
+اضغط *"🎬 إنشاء مسلسل جديد"* للبدء!`;
+
+export const HELP_MSG = `❓ *مساعدة - كيفية الاستخدام*
+
+*1. إنشاء مسلسل جديد:*
+- اختر نوع المسلسل (رعب، أكشن...)
+- أدخل اسم المسلسل
+- وصف مختصر (اختياري)
+- حدد عدد الحلقات
+- اختر اللغة والصوت
+- سيتم توليد السيناريو الكامل تلقائياً!
+
+*2. النشر التلقائي:*
+يتم نشر حلقة واحدة يومياً على يوتيوب تلقائياً الساعة 1 ظهراً.
+
+*3. النشر اليدوي:*
+اضغط "▶️ نشر حلقة الآن" لنشر حلقة فوراً.
+
+*4. إعداد يوتيوب:*
+أدخل بيانات OAuth الخاصة بقناتك لنشر الفيديوهات.
+
+⚡ *التقنيات المستخدمة:*
+• Groq AI - توليد السيناريو
+• FLUX + AnimateDiff - توليد الفيديو
+• ElevenLabs - التعليق الصوتي
+• FFmpeg - دمج الصوت والفيديو`;
+
+export function newSeriesMsg(step, total) {
+  return `📝 *إنشاء مسلسل جديد (${step}/${total})*\n\n`;
+}
