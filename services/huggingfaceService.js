@@ -2,7 +2,6 @@ import axios from 'axios';
 import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import FormData from 'form-data';
 import { logger } from '../utils/logger.js';
 import dotenv from 'dotenv';
 dotenv.config();
@@ -13,106 +12,68 @@ fs.ensureDirSync(TEMP_DIR);
 
 const HF_TOKEN = process.env.HUGGINGFACE_API_KEY;
 
-// Free models for video/image generation
+// ✅ Models that work on HuggingFace free inference API
 const MODELS = {
-  // Text-to-video (free tier)
-  textToVideo: 'stabilityai/stable-video-diffusion-img2vid',
-  // Image generation then animate
-  textToImage: 'black-forest-labs/FLUX.1-schnell',
-  // Animation from image  
-  imgToVideo: 'ByteDance/AnimateDiff-Lightning'
+  primary: 'stabilityai/stable-diffusion-xl-base-1.0',
+  fallback: 'runwayml/stable-diffusion-v1-5',
 };
 
 /**
- * Generate image from prompt using FLUX (free)
+ * Generate image from prompt - with retry and fallback
  */
 export async function generateImageFromPrompt(prompt) {
-  logger.api('Generating image with FLUX.1-schnell');
+  logger.api('Generating image with Stable Diffusion');
 
-  const response = await axios.post(
-    `https://api-inference.huggingface.co/models/${MODELS.textToImage}`,
-    { inputs: prompt + ', anime style, high quality, vibrant colors' },
-    {
-      headers: {
-        Authorization: `Bearer ${HF_TOKEN}`,
-        'Content-Type': 'application/json',
-        Accept: 'image/jpeg'
-      },
-      responseType: 'arraybuffer',
-      timeout: 120000
+  const models = [MODELS.primary, MODELS.fallback];
+
+  for (const model of models) {
+    try {
+      const response = await axios.post(
+        `https://api-inference.huggingface.co/models/${model}`,
+        {
+          inputs: prompt + ', anime style, high quality, vibrant colors, detailed',
+          parameters: {
+            num_inference_steps: 25,
+            guidance_scale: 7.5,
+            width: 512,
+            height: 512
+          }
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${HF_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          responseType: 'arraybuffer',
+          timeout: 120000
+        }
+      );
+
+      // Verify it's actually an image
+      if (response.data.byteLength < 5000) {
+        const text = Buffer.from(response.data).toString();
+        throw new Error(`Not an image: ${text.substring(0, 100)}`);
+      }
+
+      const fileName = `img_${Date.now()}.jpg`;
+      const filePath = path.join(TEMP_DIR, fileName);
+      await fs.writeFile(filePath, Buffer.from(response.data));
+      logger.success('HF', `Image saved: ${fileName}`);
+      return filePath;
+
+    } catch (err) {
+      logger.warn('HF', `${model} failed: ${err.message}`);
     }
-  );
+  }
 
-  const fileName = `img_${Date.now()}.jpg`;
-  const filePath = path.join(TEMP_DIR, fileName);
-  await fs.writeFile(filePath, Buffer.from(response.data));
-  logger.success('HF', `Image generated: ${fileName}`);
-  return filePath;
+  throw new Error('فشل توليد الصورة - الموديلات غير متاحة حالياً، تحقق من HUGGINGFACE_API_KEY');
 }
 
 /**
- * Generate video using AnimateDiff or stable-video from image
+ * For free HF tier, video generation is not reliable.
+ * We return the image path and let ffmpegService convert it to video.
  */
 export async function generateVideoFromImage(imagePath, prompt) {
-  logger.api('Generating video from image with AnimateDiff');
-
-  try {
-    const imageData = await fs.readFile(imagePath);
-    const base64Image = imageData.toString('base64');
-
-    const response = await axios.post(
-      `https://api-inference.huggingface.co/models/ByteDance/AnimateDiff-Lightning`,
-      {
-        inputs: prompt + ', anime animation, smooth motion, high quality',
-        image: base64Image
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${HF_TOKEN}`,
-          'Content-Type': 'application/json',
-          Accept: 'video/mp4'
-        },
-        responseType: 'arraybuffer',
-        timeout: 180000
-      }
-    );
-
-    const fileName = `vid_${Date.now()}.mp4`;
-    const filePath = path.join(TEMP_DIR, fileName);
-    await fs.writeFile(filePath, Buffer.from(response.data));
-    logger.success('HF', `Video generated: ${fileName}`);
-    return filePath;
-  } catch (err) {
-    logger.warn('HF', `AnimateDiff failed, trying alt model: ${err.message}`);
-    // Fallback: use stable-video-diffusion
-    return await generateVideoFallback(imagePath);
-  }
-}
-
-/**
- * Fallback: Use stable-video-diffusion
- */
-async function generateVideoFallback(imagePath) {
-  const imageData = await fs.readFile(imagePath);
-  const base64Image = imageData.toString('base64');
-
-  const response = await axios.post(
-    `https://api-inference.huggingface.co/models/stabilityai/stable-video-diffusion-img2vid-xt`,
-    { inputs: base64Image },
-    {
-      headers: {
-        Authorization: `Bearer ${HF_TOKEN}`,
-        'Content-Type': 'application/json',
-        Accept: 'video/mp4'
-      },
-      responseType: 'arraybuffer',
-      timeout: 300000
-    }
-  );
-
-  const fileName = `vid_fallback_${Date.now()}.mp4`;
-  const filePath = path.join(TEMP_DIR, fileName);
-  await fs.writeFile(filePath, Buffer.from(response.data));
-  logger.success('HF', `Video generated (fallback): ${fileName}`);
-  return filePath;
+  logger.api('Using image as video source (ffmpeg will animate)');
+  return imagePath;
 }
