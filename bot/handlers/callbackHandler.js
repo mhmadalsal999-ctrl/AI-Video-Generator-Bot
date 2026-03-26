@@ -1,182 +1,203 @@
-// ═══════════════ KEYBOARDS ═══════════════
+import {
+  getUserState, setUserState, updateTempData,
+  getUserSeries, getSeriesById, updateSeries,
+  getSeriesEpisodes, getYouTubeChannel
+} from '../../db/database.js';
+import {
+  mainKeyboard, cancelKeyboard, episodesCountKeyboard,
+  languageKeyboard, voiceKeyboard, seriesActionsKeyboard,
+  youtubeSetupKeyboard, confirmKeyboard, newSeriesMsg
+} from '../messages.js';
+import { FREE_VOICES } from '../../services/elevenLabsService.js';
+import { triggerManualPublish } from '../../services/cronScheduler.js';
+import { logger } from '../../utils/logger.js';
 
-export function mainKeyboard() {
-  return {
-    reply_markup: {
-      keyboard: [
-        [{ text: '🎬 إنشاء مسلسل جديد' }, { text: '📺 مسلسلاتي' }],
-        [{ text: '▶️ نشر حلقة الآن' }, { text: '📊 الإحصائيات' }],
-        [{ text: '⚙️ إعدادات يوتيوب' }, { text: '❓ مساعدة' }]
-      ],
-      resize_keyboard: true,
-      one_time_keyboard: false
-    }
-  };
-}
+const STATES = {
+  IDLE: 'idle',
+  NEW_SERIES_TITLE: 'new_series_title',
+  NEW_SERIES_DESC: 'new_series_desc',
+  YT_CLIENT_ID: 'yt_client_id',
+  YT_CLIENT_SECRET: 'yt_client_secret',
+  YT_REFRESH_TOKEN: 'yt_refresh_token'
+};
 
-export function cancelKeyboard() {
-  return {
-    reply_markup: {
-      keyboard: [[{ text: '❌ إلغاء' }]],
-      resize_keyboard: true,
-      one_time_keyboard: false
-    }
-  };
-}
+export async function handleCallbackQuery(bot, query) {
+  const chatId = query.message.chat.id;
+  const userId = query.from.id.toString();
+  const data = query.data;
+  const msgId = query.message.message_id;
 
-export function genreKeyboard() {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '👻 رعب', callback_data: 'genre:horror' },
-          { text: '⚔️ أكشن', callback_data: 'genre:action' }
-        ],
-        [
-          { text: '💕 رومانسي', callback_data: 'genre:romance' },
-          { text: '😄 كوميدي', callback_data: 'genre:comedy' }
-        ],
-        [
-          { text: '🧙 خيال وسحر', callback_data: 'genre:fantasy' },
-          { text: '🚀 خيال علمي', callback_data: 'genre:scifi' }
-        ],
-        [
-          { text: '🔥 إثارة', callback_data: 'genre:thriller' },
-          { text: '💔 دراما', callback_data: 'genre:drama' }
-        ]
-      ]
-    }
-  };
-}
+  await bot.answerCallbackQuery(query.id).catch(() => {});
+  logger.bot(`Callback from ${userId}: ${data}`);
 
-export function episodesCountKeyboard() {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '5 حلقات', callback_data: 'episodes:5' },
-          { text: '10 حلقات', callback_data: 'episodes:10' }
-        ],
-        [
-          { text: '15 حلقة', callback_data: 'episodes:15' },
-          { text: '20 حلقة', callback_data: 'episodes:20' }
-        ]
-      ]
-    }
-  };
-}
+  const stateData = await getUserState(userId);
+  const tempData = stateData?.temp_data || {};
 
-export function languageKeyboard() {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '🇸🇦 عربي', callback_data: 'lang:ar' },
-          { text: '🇺🇸 English', callback_data: 'lang:en' }
-        ]
-      ]
-    }
-  };
-}
-
-export function voiceKeyboard(voices) {
-  const rows = [];
-  for (let i = 0; i < Math.min(voices.length, 5); i += 2) {
-    const row = [{ text: voices[i].name, callback_data: `voice:${voices[i].id}` }];
-    if (voices[i + 1]) row.push({ text: voices[i + 1].name, callback_data: `voice:${voices[i + 1].id}` });
-    rows.push(row);
+  // ── Genre selection ──
+  if (data.startsWith('genre:')) {
+    const genre = data.split(':')[1];
+    await updateTempData(userId, { genre });
+    await bot.editMessageText(
+      `${newSeriesMsg(1, 5)}✏️ *أدخل اسم المسلسل:*\n\nمثال: "أبطال المجرة" أو "ظلام الليل"`,
+      { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown' }
+    );
+    await setUserState(userId, STATES.NEW_SERIES_TITLE, { genre });
+    return;
   }
-  rows.push([{ text: '⏩ تخطي (صوت افتراضي)', callback_data: 'voice:default' }]);
-  return { reply_markup: { inline_keyboard: rows } };
-}
 
-export function seriesListKeyboard(seriesList) {
-  const rows = seriesList.map((s, i) => [{
-    text: `${i + 1}. ${s.title} (${s.current_episode}/${s.total_episodes})`,
-    callback_data: `series:${s.id}`
-  }]);
-  rows.push([{ text: '🔙 رجوع', callback_data: 'back:main' }]);
-  return { reply_markup: { inline_keyboard: rows } };
-}
+  // ── Episode count ──
+  if (data.startsWith('episodes:')) {
+    const count = parseInt(data.split(':')[1]);
+    await updateTempData(userId, { total_episodes: count });
+    await bot.editMessageText(
+      `${newSeriesMsg(3, 5)}🌐 *اختر لغة المسلسل:*`,
+      { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...languageKeyboard() }
+    );
+    return;
+  }
 
-export function seriesActionsKeyboard(seriesId) {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '▶️ نشر حلقة الآن', callback_data: `publish_now:${seriesId}` },
-          { text: '📋 عرض الحلقات', callback_data: `episodes_list:${seriesId}` }
-        ],
-        [
-          { text: '🗑️ حذف المسلسل', callback_data: `delete_series:${seriesId}` },
-          { text: '🔙 رجوع', callback_data: 'back:my_series' }
-        ]
-      ]
+  // ── Language ──
+  if (data.startsWith('lang:')) {
+    const lang = data.split(':')[1];
+    await updateTempData(userId, { language: lang });
+    await bot.editMessageText(
+      `${newSeriesMsg(4, 5)}🎙️ *اختر الصوت للتعليق:*`,
+      { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...voiceKeyboard(FREE_VOICES) }
+    );
+    return;
+  }
+
+  // ── Voice selection ──
+  if (data.startsWith('voice:')) {
+    const voiceId = data.split(':')[1];
+    await updateTempData(userId, { voice_id: voiceId });
+
+    const updatedTemp = { ...tempData, voice_id: voiceId };
+    await bot.editMessageText(
+      `${newSeriesMsg(5, 5)}✍️ *أدخل وصفاً مختصراً للمسلسل:*\n_(اختياري - يمكنك إرسال "تخطي")_\n\nأو أرسل وصفاً الآن في الرسالة التالية.`,
+      { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown' }
+    );
+    await setUserState(userId, STATES.NEW_SERIES_DESC, updatedTemp);
+    return;
+  }
+
+  // ── Series selection ──
+  if (data.startsWith('series:')) {
+    const seriesId = parseInt(data.split(':')[1]);
+    const series = await getSeriesById(seriesId);
+    if (!series) return bot.sendMessage(chatId, '❌ المسلسل غير موجود.');
+
+    const episodes = await getSeriesEpisodes(seriesId);
+    const published = episodes.filter(e => e.status === 'published').length;
+    const failed = episodes.filter(e => e.status === 'failed').length;
+    const pending = episodes.filter(e => e.status === 'pending').length;
+
+    await bot.editMessageText(
+      `📺 *${series.title}*\n\n` +
+      `🎭 النوع: ${series.genre}\n` +
+      `📋 الحلقات: ${series.total_episodes}\n` +
+      `✅ منشورة: ${published}\n` +
+      `⏳ معلقة: ${pending}\n` +
+      `❌ فاشلة: ${failed}\n\n` +
+      `📅 النشر التلقائي: يومياً`,
+      { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...seriesActionsKeyboard(seriesId) }
+    );
+    return;
+  }
+
+  // ── Publish now ──
+  if (data.startsWith('publish_now:')) {
+    const seriesId = parseInt(data.split(':')[1]);
+    const series = await getSeriesById(seriesId);
+    if (!series) return bot.sendMessage(chatId, '❌ المسلسل غير موجود.');
+
+    await bot.editMessageText(
+      `⏳ *جاري توليد الحلقة ونشرها...*\n\nالمسلسل: ${series.title}\n\nهذا قد يستغرق عدة دقائق. ستصلك إشعار عند الانتهاء.`,
+      { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown' }
+    );
+
+    // Run in background
+    triggerManualPublish(seriesId).catch(async (err) => {
+      logger.error('BOT', `Manual publish failed: ${err.message}`);
+      await bot.sendMessage(chatId, `❌ فشل النشر:\n${err.message}`, mainKeyboard());
+    });
+    return;
+  }
+
+  // ── Episodes list ──
+  if (data.startsWith('episodes_list:')) {
+    const seriesId = parseInt(data.split(':')[1]);
+    const episodes = await getSeriesEpisodes(seriesId);
+    
+    const statusEmoji = { published: '✅', pending: '⏳', generating: '🔄', failed: '❌', video_ready: '🎬' };
+    const list = episodes.map(e =>
+      `${statusEmoji[e.status] || '⏳'} ${e.episode_number}. ${e.title}`
+    ).join('\n');
+
+    await bot.editMessageText(
+      `📋 *قائمة الحلقات:*\n\n${list}`,
+      { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '🔙 رجوع', callback_data: `series:${seriesId}` }]] }
+      }
+    );
+    return;
+  }
+
+  // ── Delete series ──
+  if (data.startsWith('delete_series:')) {
+    const seriesId = data.split(':')[1];
+    await bot.editMessageText(
+      '⚠️ *هل أنت متأكد من حذف هذا المسلسل؟*\n\nلا يمكن التراجع عن هذا الإجراء.',
+      { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...confirmKeyboard(`delete_series_${seriesId}`) }
+    );
+    return;
+  }
+
+  // ── Confirm actions ──
+  if (data.startsWith('confirm:delete_series_')) {
+    const seriesId = parseInt(data.replace('confirm:delete_series_', ''));
+    await updateSeries(seriesId, { status: 'deleted' });
+    await bot.editMessageText('✅ تم حذف المسلسل.', { chat_id: chatId, message_id: msgId });
+    await bot.sendMessage(chatId, '👋 القائمة الرئيسية:', mainKeyboard());
+    return;
+  }
+
+  // ── YouTube setup ──
+  if (data === 'yt_setup:manual') {
+    await bot.editMessageText(
+      `⚙️ *إعداد يوتيوب (1/3)*\n\n🆔 أدخل *Client ID:*\n\n_احصل عليه من Google Cloud Console → APIs & Services → Credentials_`,
+      { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown' }
+    );
+    await setUserState(userId, STATES.YT_CLIENT_ID, {});
+    return;
+  }
+
+  // ── Back buttons ──
+  if (data === 'back:main') {
+    await bot.editMessageText('👋 القائمة الرئيسية:', { chat_id: chatId, message_id: msgId });
+    await bot.sendMessage(chatId, '👋 اختر من الأزرار أدناه:', mainKeyboard());
+    return;
+  }
+
+  if (data === 'back:my_series') {
+    const series = await getUserSeries(userId);
+    if (!series.length) {
+      await bot.editMessageText('📭 لا توجد مسلسلات.', { chat_id: chatId, message_id: msgId });
+      return;
     }
-  };
-}
+    await bot.editMessageText('📺 *مسلسلاتك:*', {
+      chat_id: chatId, message_id: msgId,
+      parse_mode: 'Markdown',
+      ...seriesListKeyboard(series)
+    });
+    return;
+  }
 
-export function confirmKeyboard(action) {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '✅ تأكيد', callback_data: `confirm:${action}` },
-          { text: '❌ إلغاء', callback_data: 'cancel:action' }
-        ]
-      ]
-    }
-  };
-}
+  if (data === 'cancel:action') {
+    await bot.editMessageText('✅ تم الإلغاء.', { chat_id: chatId, message_id: msgId });
+    await setUserState(userId, STATES.IDLE, {});
+    return;
+  }
 
-export function youtubeSetupKeyboard() {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '🔑 إعداد يدوي (OAuth)', callback_data: 'yt_setup:manual' }],
-        [{ text: '🔙 رجوع', callback_data: 'back:main' }]
-      ]
-    }
-  };
-}
-
-// ═══════════════ MESSAGES ═══════════════
-
-export const WELCOME_MSG = `🎌 *مرحباً بك في بوت الأنيميشن الذكي!*
-
-أنا قادر على:
-🎬 *توليد مسلسلات أنيميشن كاملة* - سيناريو + فيديو + صوت
-📅 *نشر تلقائي يومي* على يوتيوب
-🎭 *شخصيات ثابتة* في كل حلقة
-🎙️ *تعليق صوتي* بأصوات احترافية
-
-اضغط *"🎬 إنشاء مسلسل جديد"* للبدء!`;
-
-export const HELP_MSG = `❓ *مساعدة - كيفية الاستخدام*
-
-*1. إنشاء مسلسل جديد:*
-- اختر نوع المسلسل (رعب، أكشن...)
-- أدخل اسم المسلسل
-- وصف مختصر (اختياري)
-- حدد عدد الحلقات
-- اختر اللغة والصوت
-- سيتم توليد السيناريو الكامل تلقائياً!
-
-*2. النشر التلقائي:*
-يتم نشر حلقة واحدة يومياً على يوتيوب تلقائياً الساعة 1 ظهراً.
-
-*3. النشر اليدوي:*
-اضغط "▶️ نشر حلقة الآن" لنشر حلقة فوراً.
-
-*4. إعداد يوتيوب:*
-أدخل بيانات OAuth الخاصة بقناتك لنشر الفيديوهات.
-
-⚡ *التقنيات المستخدمة:*
-• Groq AI - توليد السيناريو
-• FLUX + AnimateDiff - توليد الفيديو
-• ElevenLabs - التعليق الصوتي
-• FFmpeg - دمج الصوت والفيديو`;
-
-export function newSeriesMsg(step, total) {
-  return `📝 *إنشاء مسلسل جديد (${step}/${total})*\n\n`;
+  logger.warn('BOT', `Unknown callback: ${data}`);
 }
