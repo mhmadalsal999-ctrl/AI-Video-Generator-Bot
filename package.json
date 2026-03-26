@@ -1,16 +1,13 @@
 {
   "name": "anime-series-bot",
   "version": "2.0.0",
-  "description": "Telegram bot for AI anime series generation and auto-publishing to YouTube",
+  "description": "Telegram bot for AI anime series",
   "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js"
   },
-  "keywords": ["telegram", "bot", "anime", "ai", "youtube", "automation"],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
     "express": "^4.18.2",
     "node-telegram-bot-api": "^0.64.0",
