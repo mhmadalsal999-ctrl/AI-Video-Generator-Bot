@@ -11,6 +11,9 @@
   "keywords": ["telegram", "bot", "anime", "ai", "youtube", "automation"],
   "author": "",
   "license": "ISC",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "express": "^4.18.2",
     "node-telegram-bot-api": "^0.64.0",
