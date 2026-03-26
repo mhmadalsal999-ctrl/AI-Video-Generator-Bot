@@ -7,8 +7,7 @@ import {
 import {
   mainKeyboard, cancelKeyboard, genreKeyboard, episodesCountKeyboard,
   languageKeyboard, voiceKeyboard, seriesListKeyboard,
-  seriesActionsKeyboard, youtubeSetupKeyboard,
-  WELCOME_MSG, HELP_MSG, newSeriesMsg
+  youtubeSetupKeyboard, WELCOME_MSG, HELP_MSG, newSeriesMsg
 } from '../messages.js';
 import { generateSeriesScenario } from '../../services/groqService.js';
 import { FREE_VOICES } from '../../services/elevenLabsService.js';
@@ -28,48 +27,57 @@ const STATES = {
 export async function handleMessage(bot, msg) {
   const chatId = msg.chat.id;
   const userId = msg.from.id.toString();
-  const text = msg.text || '';
+  const text = msg.text?.trim() || '';
 
-  logger.bot(`Message from ${userId}: ${text.substring(0, 50)}`);
+  logger.bot(`Msg from ${userId}: "${text.substring(0, 40)}"`);
 
+  // تحميل الحالة
   const stateData = await getUserState(userId);
   const state = stateData?.state || STATES.IDLE;
   const tempData = stateData?.temp_data || {};
 
-  // ── COMMANDS ──
-  if (text === '/start' || text === '🏠 الرئيسية') {
+  // ── أوامر عامة تعمل في أي حالة ──
+  if (text === '/start') {
     await setUserState(userId, STATES.IDLE, {});
-    return bot.sendMessage(chatId, WELCOME_MSG, { ...mainKeyboard(), parse_mode: 'Markdown' });
+    return bot.sendMessage(chatId, WELCOME_MSG, {
+      parse_mode: 'Markdown',
+      ...mainKeyboard()
+    });
   }
 
-  if (text === '❓ مساعدة') {
-    return bot.sendMessage(chatId, HELP_MSG, { parse_mode: 'Markdown', ...mainKeyboard() });
+  if (text === '/help' || text === '❓ مساعدة') {
+    return bot.sendMessage(chatId, HELP_MSG, {
+      parse_mode: 'Markdown',
+      ...mainKeyboard()
+    });
   }
 
-  if (text === '❌ إلغاء') {
+  if (text === '/cancel' || text === '❌ إلغاء') {
     await setUserState(userId, STATES.IDLE, {});
     return bot.sendMessage(chatId, '✅ تم الإلغاء.', mainKeyboard());
   }
 
-  // ── MAIN MENU BUTTONS ──
+  // ── أزرار القائمة الرئيسية ──
   if (text === '🎬 إنشاء مسلسل جديد') {
     await setUserState(userId, STATES.IDLE, {});
-    await bot.sendMessage(chatId, '🎭 *اختر نوع المسلسل:*', {
+    return bot.sendMessage(chatId, '🎭 *اختر نوع المسلسل:*', {
       parse_mode: 'Markdown',
       ...genreKeyboard()
     });
-    return;
   }
 
   if (text === '📺 مسلسلاتي') {
     const series = await getUserSeries(userId);
-    if (series.length === 0) {
-      return bot.sendMessage(chatId, '📭 لا توجد مسلسلات بعد.\n\nاضغط "🎬 إنشاء مسلسل جديد" للبدء!', mainKeyboard());
+    if (!series.length) {
+      return bot.sendMessage(chatId,
+        '📭 لا توجد مسلسلات بعد.\n\nاضغط "🎬 إنشاء مسلسل جديد" للبدء!',
+        mainKeyboard()
+      );
     }
-    const msg2 = series.map((s, i) =>
-      `${i + 1}. *${s.title}*\n   📁 ${s.genre} | الحلقة ${s.current_episode}/${s.total_episodes}`
+    const list = series.map((s, i) =>
+      `${i + 1}. *${s.title}*\n   ${s.genre} | الحلقة ${s.current_episode}/${s.total_episodes}`
     ).join('\n\n');
-    return bot.sendMessage(chatId, `📺 *مسلسلاتك:*\n\n${msg2}\n\nاختر مسلسلاً:`, {
+    return bot.sendMessage(chatId, `📺 *مسلسلاتك:*\n\n${list}\n\nاختر مسلسلاً:`, {
       parse_mode: 'Markdown',
       ...seriesListKeyboard(series)
     });
@@ -77,20 +85,22 @@ export async function handleMessage(bot, msg) {
 
   if (text === '▶️ نشر حلقة الآن') {
     const series = await getUserSeries(userId);
-    if (series.length === 0) {
-      return bot.sendMessage(chatId, '❌ لا توجد مسلسلات نشطة.\n\nأنشئ مسلسلاً أولاً!', mainKeyboard());
+    if (!series.length) {
+      return bot.sendMessage(chatId, '❌ لا توجد مسلسلات نشطة. أنشئ مسلسلاً أولاً!', mainKeyboard());
     }
     return bot.sendMessage(chatId, '🎬 *اختر المسلسل للنشر الفوري:*', {
       parse_mode: 'Markdown',
-      ...seriesListKeyboard(series.map(s => ({ ...s, _action: 'publish_now' })))
+      ...seriesListKeyboard(series)
     });
   }
 
   if (text === '📊 الإحصائيات') {
     const series = await getUserSeries(userId);
-    const totalEps = series.reduce((a, s) => a + s.current_episode, 0);
-    const msg2 = `📊 *إحصائياتك:*\n\n🎭 المسلسلات: ${series.length}\n🎬 الحلقات المنشورة: ${totalEps}\n📅 النشر التلقائي: يومياً الساعة 1 ظهراً`;
-    return bot.sendMessage(chatId, msg2, { parse_mode: 'Markdown', ...mainKeyboard() });
+    const totalEps = series.reduce((a, s) => a + (s.current_episode || 0), 0);
+    return bot.sendMessage(chatId,
+      `📊 *إحصائياتك:*\n\n🎭 المسلسلات النشطة: ${series.length}\n🎬 الحلقات المنشورة: ${totalEps}\n⏰ النشر التلقائي: يومياً الساعة 1 ظهراً`,
+      { parse_mode: 'Markdown', ...mainKeyboard() }
+    );
   }
 
   if (text === '⚙️ إعدادات يوتيوب') {
@@ -102,104 +112,98 @@ export async function handleMessage(bot, msg) {
       );
     }
     return bot.sendMessage(chatId,
-      `⚙️ *إعداد قناة يوتيوب*\n\nاضغط على الزر أدناه لبدء الإعداد:`,
+      `⚙️ *إعداد قناة يوتيوب*\n\nاضغط الزر أدناه للبدء:`,
       { parse_mode: 'Markdown', ...youtubeSetupKeyboard() }
     );
   }
 
-  // ── STATE MACHINE ──
+  // ── State Machine ──
   switch (state) {
+
     case STATES.NEW_SERIES_TITLE: {
-      if (!text.trim()) return bot.sendMessage(chatId, '⚠️ يرجى إدخال اسم المسلسل.', cancelKeyboard());
-      await updateTempData(userId, { title: text.trim() });
-      await setUserState(userId, STATES.NEW_SERIES_DESC, { ...tempData, title: text.trim() });
+      if (!text) return bot.sendMessage(chatId, '⚠️ يرجى إدخال اسم المسلسل.', cancelKeyboard());
+      const updated = { ...tempData, title: text };
+      await setUserState(userId, STATES.NEW_SERIES_DESC, updated);
       return bot.sendMessage(chatId,
-        `${newSeriesMsg(2, 5)}✍️ *أدخل وصفاً مختصراً للمسلسل:*\n_(اختياري - يمكنك إرسال "تخطي")_`,
+        `${newSeriesMsg(2, 5)}✍️ *أدخل وصفاً مختصراً للمسلسل:*\n\n_(اختياري - أرسل "تخطي" للمتابعة)_`,
         { parse_mode: 'Markdown', ...cancelKeyboard() }
       );
     }
 
     case STATES.NEW_SERIES_DESC: {
-      const description = text === 'تخطي' ? '' : text.trim();
-      const updatedTemp = { ...tempData, description };
-      await setUserState(userId, STATES.IDLE, updatedTemp);
+      const description = (text === 'تخطي' || text === 'skip') ? '' : text;
+      const finalData = { ...tempData, description };
+
+      // إعادة الحالة للـ idle قبل التوليد لمنع التكرار
+      await setUserState(userId, STATES.IDLE, {});
 
       const loadingMsg = await bot.sendMessage(chatId,
-        `⏳ *جاري توليد السيناريو الكامل...*\n\nهذا قد يستغرق 30-60 ثانية.`,
+        `⏳ *جاري توليد السيناريو الكامل...*\n\n📝 المسلسل: ${finalData.title}\n🎭 النوع: ${finalData.genre}\n📋 الحلقات: ${finalData.total_episodes}\n\nهذا يستغرق 30-60 ثانية...`,
         { parse_mode: 'Markdown' }
       );
 
       try {
         const scenario = await generateSeriesScenario(
-          updatedTemp.title,
-          updatedTemp.genre,
+          finalData.title,
+          finalData.genre,
           description,
-          updatedTemp.total_episodes,
-          updatedTemp.language
+          finalData.total_episodes || 10,
+          finalData.language || 'ar'
         );
 
-        // Create series in DB
+        // إنشاء المسلسل في قاعدة البيانات
         const series = await createSeries(userId, {
-          title: updatedTemp.title,
-          genre: updatedTemp.genre,
+          title: finalData.title,
+          genre: finalData.genre,
           description,
-          characters: scenario.characters,
+          characters: scenario.characters || [],
           full_scenario: JSON.stringify(scenario),
-          total_episodes: updatedTemp.total_episodes,
-          voice_id: updatedTemp.voice_id !== 'default' ? updatedTemp.voice_id : null,
-          language: updatedTemp.language
+          total_episodes: finalData.total_episodes || 10,
+          voice_id: finalData.voice_id && finalData.voice_id !== 'default' ? finalData.voice_id : null,
+          language: finalData.language || 'ar'
         });
 
-        // Create all episodes
-        for (const ep of scenario.episodes) {
-          await createEpisode(series.id, userId, ep.number, ep.scene || ep.summary, ep.title);
+        // إنشاء كل الحلقات
+        for (const ep of (scenario.episodes || [])) {
+          await createEpisode(
+            series.id, userId,
+            ep.number,
+            ep.scene || ep.summary || '',
+            ep.title || `الحلقة ${ep.number}`
+          );
         }
 
         await bot.deleteMessage(chatId, loadingMsg.message_id).catch(() => {});
 
-        const charNames = scenario.characters.map(c => `• *${c.name}* - ${c.personality}`).join('\n');
+        const charList = (scenario.characters || [])
+          .map(c => `• *${c.name}* — ${c.personality}`)
+          .join('\n');
 
-        // ✅ زر معاينة الحلقة الأولى + زر النشر
         await bot.sendMessage(chatId,
           `✅ *تم إنشاء المسلسل بنجاح!*\n\n` +
           `📺 *${series.title}*\n` +
-          `🎭 النوع: ${updatedTemp.genre}\n` +
-          `📋 عدد الحلقات: ${series.total_episodes}\n\n` +
-          `👥 *الشخصيات:*\n${charNames}\n\n` +
-          `📖 *ملخص القصة:*\n${scenario.story_summary}\n\n` +
-          `👇 *اختر ما تريد فعله الآن:*`,
-          {
-            parse_mode: 'Markdown',
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: '👁️ معاينة الحلقة الأولى', callback_data: `preview_ep:${series.id}:1` }
-                ],
-                [
-                  { text: '▶️ نشر الحلقة الأولى على يوتيوب', callback_data: `publish_now:${series.id}` }
-                ],
-                [
-                  { text: '⏰ اترك النشر التلقائي يومياً', callback_data: `back:main` }
-                ]
-              ]
-            }
-          }
+          `🎭 النوع: ${finalData.genre}\n` +
+          `📋 الحلقات: ${series.total_episodes}\n\n` +
+          `👥 *الشخصيات:*\n${charList}\n\n` +
+          `📖 *ملخص القصة:*\n${scenario.story_summary || ''}\n\n` +
+          `⏰ سيتم نشر حلقة يومياً تلقائياً!\n` +
+          `أو اضغط *"▶️ نشر حلقة الآن"* للنشر الفوري.`,
+          { parse_mode: 'Markdown', ...mainKeyboard() }
         );
-
-        await setUserState(userId, STATES.IDLE, {});
       } catch (err) {
         await bot.deleteMessage(chatId, loadingMsg.message_id).catch(() => {});
         logger.error('BOT', `Series creation failed: ${err.message}`);
-        await bot.sendMessage(chatId, `❌ فشل في توليد السيناريو:\n${err.message}\n\nحاول مرة أخرى.`, mainKeyboard());
-        await setUserState(userId, STATES.IDLE, {});
+        await bot.sendMessage(chatId,
+          `❌ *فشل في توليد السيناريو*\n\n${err.message}\n\nحاول مرة أخرى.`,
+          { parse_mode: 'Markdown', ...mainKeyboard() }
+        );
       }
       return;
     }
 
-    // YouTube setup states
     case STATES.YT_CLIENT_ID: {
-      if (!text.trim()) return bot.sendMessage(chatId, '⚠️ يرجى إدخال Client ID.', cancelKeyboard());
-      await setUserState(userId, STATES.YT_CLIENT_SECRET, { ...tempData, yt_client_id: text.trim() });
+      if (!text) return bot.sendMessage(chatId, '⚠️ يرجى إدخال Client ID.', cancelKeyboard());
+      await setUserState(userId, STATES.YT_CLIENT_SECRET, { ...tempData, yt_client_id: text });
       return bot.sendMessage(chatId,
         `⚙️ *إعداد يوتيوب (2/3)*\n\n🔐 أدخل *Client Secret:*`,
         { parse_mode: 'Markdown', ...cancelKeyboard() }
@@ -207,8 +211,8 @@ export async function handleMessage(bot, msg) {
     }
 
     case STATES.YT_CLIENT_SECRET: {
-      if (!text.trim()) return bot.sendMessage(chatId, '⚠️ يرجى إدخال Client Secret.', cancelKeyboard());
-      await setUserState(userId, STATES.YT_REFRESH_TOKEN, { ...tempData, yt_client_secret: text.trim() });
+      if (!text) return bot.sendMessage(chatId, '⚠️ يرجى إدخال Client Secret.', cancelKeyboard());
+      await setUserState(userId, STATES.YT_REFRESH_TOKEN, { ...tempData, yt_client_secret: text });
       return bot.sendMessage(chatId,
         `⚙️ *إعداد يوتيوب (3/3)*\n\n🔄 أدخل *Refresh Token:*`,
         { parse_mode: 'Markdown', ...cancelKeyboard() }
@@ -216,35 +220,41 @@ export async function handleMessage(bot, msg) {
     }
 
     case STATES.YT_REFRESH_TOKEN: {
-      if (!text.trim()) return bot.sendMessage(chatId, '⚠️ يرجى إدخال Refresh Token.', cancelKeyboard());
+      if (!text) return bot.sendMessage(chatId, '⚠️ يرجى إدخال Refresh Token.', cancelKeyboard());
 
       const verifyMsg = await bot.sendMessage(chatId, '🔍 جاري التحقق من بيانات القناة...');
 
       const result = await verifyYouTubeCredentials(
         tempData.yt_client_id,
         tempData.yt_client_secret,
-        text.trim()
+        text
       );
 
       await bot.deleteMessage(chatId, verifyMsg.message_id).catch(() => {});
+      await setUserState(userId, STATES.IDLE, {});
 
       if (result.valid) {
-        await saveYouTubeChannel(userId, tempData.yt_client_id, tempData.yt_client_secret, text.trim(), result.channelId, result.channelTitle);
-        await setUserState(userId, STATES.IDLE, {});
+        await saveYouTubeChannel(
+          userId,
+          tempData.yt_client_id,
+          tempData.yt_client_secret,
+          text,
+          result.channelId,
+          result.channelTitle
+        );
         return bot.sendMessage(chatId,
           `✅ *تم ربط قناة يوتيوب بنجاح!*\n\n📺 القناة: *${result.channelTitle}*`,
           { parse_mode: 'Markdown', ...mainKeyboard() }
         );
       } else {
-        await setUserState(userId, STATES.IDLE, {});
         return bot.sendMessage(chatId,
-          `❌ *فشل التحقق:*\n${result.error}`,
+          `❌ *فشل التحقق:*\n${result.error}\n\nتحقق من البيانات وحاول مرة أخرى.`,
           { parse_mode: 'Markdown', ...mainKeyboard() }
         );
       }
     }
 
     default:
-      return bot.sendMessage(chatId, '👋 استخدم الأزرار أدناه:', mainKeyboard());
+      return bot.sendMessage(chatId, '👋 اختر من الأزرار أدناه:', mainKeyboard());
   }
 }
