@@ -16,9 +16,6 @@ const GENRES = {
   drama: 'دراما عاطفية'
 };
 
-/**
- * Generate full series scenario with characters
- */
 export async function generateSeriesScenario(title, genre, description, totalEpisodes = 10, language = 'ar') {
   logger.api(`Generating series scenario: ${title}`);
 
@@ -66,7 +63,7 @@ ${description ? `وصف المسلسل: ${description}` : ''}
   });
 
   const text = response.choices[0]?.message?.content || '';
-  
+
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No JSON found in response');
@@ -79,9 +76,6 @@ ${description ? `وصف المسلسل: ${description}` : ''}
   }
 }
 
-/**
- * Generate detailed video prompt for an episode (for HuggingFace)
- */
 export async function generateVideoPrompt(episode, characters, genre) {
   logger.api(`Generating video prompt for episode ${episode.episode_number}`);
 
@@ -113,9 +107,6 @@ ${charDescriptions}
   return response.choices[0]?.message?.content?.trim() || '';
 }
 
-/**
- * Generate narration text for ElevenLabs
- */
 export async function generateNarrationText(episode, characters, language = 'ar') {
   logger.api(`Generating narration for episode ${episode.episode_number}`);
 
