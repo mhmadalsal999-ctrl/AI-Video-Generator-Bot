@@ -1,5 +1,4 @@
-{
-  "name": "anime-series-bot",
+name": "anime-series-bot",
   "version": "2.0.0",
   "description": "Telegram bot for AI anime series generation",
   "main": "server.js",
