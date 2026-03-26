@@ -29,7 +29,6 @@ export async function handleMessage(bot, msg) {
   const chatId = msg.chat.id;
   const userId = msg.from.id.toString();
   const text = msg.text || '';
-  const ts = new Date().toISOString();
 
   logger.bot(`Message from ${userId}: ${text.substring(0, 50)}`);
 
@@ -90,7 +89,7 @@ export async function handleMessage(bot, msg) {
   if (text === '📊 الإحصائيات') {
     const series = await getUserSeries(userId);
     const totalEps = series.reduce((a, s) => a + s.current_episode, 0);
-    const msg2 = `📊 *إحصائياتك:*\n\n🎭 المسلسلات: ${series.length}\n🎬 الحلقات المنشورة: ${totalEps}\n📅 النشر التلقائي: يومياً الساعة 1 ظهراً (توقيت السعودية)`;
+    const msg2 = `📊 *إحصائياتك:*\n\n🎭 المسلسلات: ${series.length}\n🎬 الحلقات المنشورة: ${totalEps}\n📅 النشر التلقائي: يومياً الساعة 1 ظهراً`;
     return bot.sendMessage(chatId, msg2, { parse_mode: 'Markdown', ...mainKeyboard() });
   }
 
@@ -139,7 +138,7 @@ export async function handleMessage(bot, msg) {
           updatedTemp.language
         );
 
-        // Create series
+        // Create series in DB
         const series = await createSeries(userId, {
           title: updatedTemp.title,
           genre: updatedTemp.genre,
@@ -159,6 +158,8 @@ export async function handleMessage(bot, msg) {
         await bot.deleteMessage(chatId, loadingMsg.message_id).catch(() => {});
 
         const charNames = scenario.characters.map(c => `• *${c.name}* - ${c.personality}`).join('\n');
+
+        // ✅ زر معاينة الحلقة الأولى + زر النشر
         await bot.sendMessage(chatId,
           `✅ *تم إنشاء المسلسل بنجاح!*\n\n` +
           `📺 *${series.title}*\n` +
@@ -166,9 +167,23 @@ export async function handleMessage(bot, msg) {
           `📋 عدد الحلقات: ${series.total_episodes}\n\n` +
           `👥 *الشخصيات:*\n${charNames}\n\n` +
           `📖 *ملخص القصة:*\n${scenario.story_summary}\n\n` +
-          `⏰ سيتم نشر حلقة يومياً تلقائياً!\n` +
-          `أو اضغط "▶️ نشر حلقة الآن" للنشر الفوري.`,
-          { parse_mode: 'Markdown', ...mainKeyboard() }
+          `👇 *اختر ما تريد فعله الآن:*`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: '👁️ معاينة الحلقة الأولى', callback_data: `preview_ep:${series.id}:1` }
+                ],
+                [
+                  { text: '▶️ نشر الحلقة الأولى على يوتيوب', callback_data: `publish_now:${series.id}` }
+                ],
+                [
+                  { text: '⏰ اترك النشر التلقائي يومياً', callback_data: `back:main` }
+                ]
+              ]
+            }
+          }
         );
 
         await setUserState(userId, STATES.IDLE, {});
@@ -195,16 +210,16 @@ export async function handleMessage(bot, msg) {
       if (!text.trim()) return bot.sendMessage(chatId, '⚠️ يرجى إدخال Client Secret.', cancelKeyboard());
       await setUserState(userId, STATES.YT_REFRESH_TOKEN, { ...tempData, yt_client_secret: text.trim() });
       return bot.sendMessage(chatId,
-        `⚙️ *إعداد يوتيوب (3/3)*\n\n🔄 أدخل *Refresh Token:*\n\n_احصل عليه من: https://developers.google.com/oauthplayground_`,
+        `⚙️ *إعداد يوتيوب (3/3)*\n\n🔄 أدخل *Refresh Token:*`,
         { parse_mode: 'Markdown', ...cancelKeyboard() }
       );
     }
 
     case STATES.YT_REFRESH_TOKEN: {
       if (!text.trim()) return bot.sendMessage(chatId, '⚠️ يرجى إدخال Refresh Token.', cancelKeyboard());
-      
+
       const verifyMsg = await bot.sendMessage(chatId, '🔍 جاري التحقق من بيانات القناة...');
-      
+
       const result = await verifyYouTubeCredentials(
         tempData.yt_client_id,
         tempData.yt_client_secret,
@@ -217,13 +232,13 @@ export async function handleMessage(bot, msg) {
         await saveYouTubeChannel(userId, tempData.yt_client_id, tempData.yt_client_secret, text.trim(), result.channelId, result.channelTitle);
         await setUserState(userId, STATES.IDLE, {});
         return bot.sendMessage(chatId,
-          `✅ *تم ربط قناة يوتيوب بنجاح!*\n\n📺 القناة: *${result.channelTitle}*\n\nسيتم نشر الفيديوهات على قناتك تلقائياً!`,
+          `✅ *تم ربط قناة يوتيوب بنجاح!*\n\n📺 القناة: *${result.channelTitle}*`,
           { parse_mode: 'Markdown', ...mainKeyboard() }
         );
       } else {
         await setUserState(userId, STATES.IDLE, {});
         return bot.sendMessage(chatId,
-          `❌ *فشل التحقق من البيانات:*\n${result.error}\n\nيرجى التأكد من البيانات والمحاولة مرة أخرى.`,
+          `❌ *فشل التحقق:*\n${result.error}`,
           { parse_mode: 'Markdown', ...mainKeyboard() }
         );
       }
