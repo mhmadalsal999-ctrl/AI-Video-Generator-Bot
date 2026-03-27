@@ -1,7 +1,14 @@
 /**
- * Image Generation Service
- * Primary:  Pollinations.ai → مجاني 100% بدون API key
- * Fallback: HuggingFace    → يستخدم HUGGINGFACE_API_KEY إذا موجود
+ * huggingfaceService.js
+ * Image Generation — Pollinations.ai (FREE, no API key)
+ * Multiple model fallback chain — no HuggingFace dependency required
+ *
+ * Fallback order:
+ * 1. Pollinations FLUX (best quality)
+ * 2. Pollinations Turbo (faster)
+ * 3. Pollinations FLUX-Realism
+ * 4. Pollinations default
+ * 5. HuggingFace (only if HUGGINGFACE_API_KEY is set)
  */
 
 import axios from 'axios';
@@ -16,56 +23,69 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMP_DIR = path.join(__dirname, '../temp');
 fs.ensureDirSync(TEMP_DIR);
 
-const HF_TOKEN = process.env.HUGGINGFACE_API_KEY;
+const QUALITY_PREFIX = 'cinematic photograph, photorealistic, dramatic lighting, detailed, professional';
+const QUALITY_SUFFIX = 'no text, no watermarks, no logos, sharp focus, high resolution';
 
-// ── 1. Pollinations.ai ─────────────────────────────────────────────
-async function generateWithPollinations(prompt) {
-  const enriched = `${prompt}, anime style, high quality, vibrant colors, detailed`;
+// ═══════════════════════════════════════════════════════════════════
+// POLLINATIONS.AI — Free, no API key, multiple models
+// ═══════════════════════════════════════════════════════════════════
+const POLLINATIONS_MODELS = [
+  { model: 'flux',          label: 'FLUX (best)' },
+  { model: 'turbo',         label: 'Turbo' },
+  { model: 'flux-realism',  label: 'FLUX Realism' },
+  { model: 'flux-anime',    label: 'FLUX Anime alt' }, // still realistic when prompted correctly
+  { model: null,            label: 'Default' }
+];
+
+async function generateWithPollinations(prompt, width = 1280, height = 720, modelIndex = 0) {
+  const modelConfig = POLLINATIONS_MODELS[modelIndex] || POLLINATIONS_MODELS[0];
+  const enriched = `${QUALITY_PREFIX}, ${prompt}, ${QUALITY_SUFFIX}`;
   const encoded = encodeURIComponent(enriched);
-  const url = `https://image.pollinations.ai/prompt/${encoded}?width=512&height=512&model=flux&nologo=true&seed=${Date.now()}`;
+  const seed = Math.floor(Math.random() * 999999);
 
-  logger.api('Trying Pollinations.ai (FLUX) — no API key needed');
+  let url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&nologo=true&enhance=true`;
+  if (modelConfig.model) url += `&model=${modelConfig.model}`;
+
+  logger.api(`Pollinations [${modelConfig.label}]: "${prompt.substring(0, 50)}..."`);
 
   const response = await axios.get(url, {
     responseType: 'arraybuffer',
-    timeout: 90000,
-    headers: { 'User-Agent': 'Mozilla/5.0' }
+    timeout: 120000,
+    headers: { 'User-Agent': 'StoryNarratorBot/3.0' }
   });
 
   const buffer = Buffer.from(response.data);
-  if (buffer.byteLength < 2000) {
-    throw new Error(`Response too small: ${buffer.byteLength} bytes`);
+  if (buffer.byteLength < 5000) {
+    throw new Error(`Pollinations [${modelConfig.label}] returned too-small image`);
   }
 
-  const filePath = path.join(TEMP_DIR, `img_${Date.now()}.jpg`);
+  const filePath = path.join(TEMP_DIR, `img_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`);
   await fs.writeFile(filePath, buffer);
-  logger.success('IMG', `Pollinations saved: ${path.basename(filePath)} (${(buffer.byteLength / 1024).toFixed(0)} KB)`);
+  logger.success('IMG', `✅ [${modelConfig.label}] saved: ${path.basename(filePath)}`);
   return filePath;
 }
 
-// ── 2. HuggingFace fallback ────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// HUGGINGFACE — Optional fallback (only if API key is configured)
+// ═══════════════════════════════════════════════════════════════════
+const HF_TOKEN = process.env.HUGGINGFACE_API_KEY;
+
 const HF_MODELS = [
-  {
-    id: 'stabilityai/stable-diffusion-2-1',
-    params: { num_inference_steps: 25, guidance_scale: 7.5, width: 768, height: 768 }
-  },
-  {
-    id: 'Lykon/dreamshaper-8',
-    params: { num_inference_steps: 25, guidance_scale: 7.5, width: 512, height: 512 }
-  }
+  'black-forest-labs/FLUX.1-schnell',
+  'stabilityai/stable-diffusion-xl-base-1.0'
 ];
 
 async function generateWithHuggingFace(prompt) {
-  if (!HF_TOKEN) throw new Error('HUGGINGFACE_API_KEY غير موجود');
+  if (!HF_TOKEN) throw new Error('HUGGINGFACE_API_KEY not set — skipping HuggingFace');
 
-  const enriched = `${prompt}, anime style, high quality, vibrant colors, detailed`;
+  const enriched = `${QUALITY_PREFIX}, ${prompt}, ${QUALITY_SUFFIX}`;
 
-  for (const model of HF_MODELS) {
+  for (const modelId of HF_MODELS) {
     try {
-      logger.api(`Trying HuggingFace: ${model.id}`);
+      logger.api(`HuggingFace fallback: ${modelId}`);
       const response = await axios.post(
-        `https://api-inference.huggingface.co/models/${model.id}`,
-        { inputs: enriched, parameters: model.params },
+        `https://api-inference.huggingface.co/models/${modelId}`,
+        { inputs: enriched, parameters: { width: 1280, height: 720 } },
         {
           headers: { Authorization: `Bearer ${HF_TOKEN}`, 'Content-Type': 'application/json' },
           responseType: 'arraybuffer',
@@ -74,46 +94,47 @@ async function generateWithHuggingFace(prompt) {
       );
 
       const buffer = Buffer.from(response.data);
-      if (buffer.byteLength < 1000 || buffer[0] === 123) {
-        logger.warn('HF', `${model.id} returned error body`);
-        continue;
-      }
+      if (buffer.byteLength < 5000) continue;
 
-      const filePath = path.join(TEMP_DIR, `img_${Date.now()}.png`);
+      const filePath = path.join(TEMP_DIR, `img_hf_${Date.now()}.png`);
       await fs.writeFile(filePath, buffer);
-      logger.success('HF', `Saved from ${model.id}`);
+      logger.success('HF', `Saved from ${modelId}`);
       return filePath;
 
     } catch (err) {
-      const s = err.response?.status;
-      if (s === 410) logger.warn('HF', `${model.id} GONE (410) - deprecated`);
-      else if (s === 503) logger.warn('HF', `${model.id} loading (503)`);
-      else logger.warn('HF', `${model.id} failed [${s}]: ${err.message}`);
+      logger.warn('HF', `${modelId} failed [${err.response?.status}]: ${err.message}`);
     }
   }
-  throw new Error('HuggingFace: جميع الموديلات غير متاحة');
+  throw new Error('HuggingFace: all models unavailable');
 }
 
-// ── Main Export ────────────────────────────────────────────────────
-export async function generateImageFromPrompt(prompt) {
-  logger.api('Generating image...');
+// ═══════════════════════════════════════════════════════════════════
+// MAIN EXPORT — Full fallback chain
+// ═══════════════════════════════════════════════════════════════════
+export async function generateImageFromPrompt(prompt, width = 1280, height = 720) {
+  logger.api('Generating historical scene image...');
 
-  try {
-    return await generateWithPollinations(prompt);
-  } catch (err) {
-    logger.warn('IMG', `Pollinations failed: ${err.message} → trying HuggingFace...`);
+  // Try all Pollinations models in order
+  for (let i = 0; i < POLLINATIONS_MODELS.length; i++) {
+    try {
+      return await generateWithPollinations(prompt, width, height, i);
+    } catch (err) {
+      logger.warn('IMG', `Pollinations [${POLLINATIONS_MODELS[i].label}] failed: ${err.message}`);
+      // Wait briefly before retrying
+      if (i < POLLINATIONS_MODELS.length - 1) await new Promise(r => setTimeout(r, 2000));
+    }
   }
 
+  // Final fallback: HuggingFace (only if API key available)
   try {
     return await generateWithHuggingFace(prompt);
   } catch (err) {
     logger.warn('IMG', `HuggingFace also failed: ${err.message}`);
   }
 
-  throw new Error('فشل توليد الصورة من جميع المصادر. حاول بعد دقائق.');
+  throw new Error('❌ فشل توليد الصورة من جميع المصادر. تحقق من الاتصال بالإنترنت وحاول مرة أخرى.');
 }
 
 export async function generateVideoFromImage(imagePath) {
-  logger.api('Using image as video source (ffmpeg will animate)');
-  return imagePath;
+  return imagePath; // ffmpegService handles image→video conversion
 }
