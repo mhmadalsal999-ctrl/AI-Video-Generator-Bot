@@ -1,6 +1,13 @@
+/**
+ * database.js — All Supabase DB operations
+ * Story Narrator Bot v3.1
+ */
+
 import { supabase } from './supabase.js';
 
-// ─────────────────── USER STATES ───────────────────
+// ═══════════════════════════════════════════════════════════════════
+// USER STATES
+// ═══════════════════════════════════════════════════════════════════
 export async function getUserState(userId) {
   const { data, error } = await supabase
     .from('user_states')
@@ -40,85 +47,98 @@ export async function updateTempData(userId, newData) {
   return merged;
 }
 
-// ─────────────────── SERIES ───────────────────
-export async function createSeries(userId, data) {
-  const { data: series, error } = await supabase
-    .from('series')
+// ═══════════════════════════════════════════════════════════════════
+// STORIES
+// ═══════════════════════════════════════════════════════════════════
+export async function createStory(userId, data) {
+  const { data: story, error } = await supabase
+    .from('stories')
     .insert({
-      user_id: userId.toString(),
-      title: data.title,
-      genre: data.genre,
-      description: data.description || '',
-      characters: data.characters || [],
-      full_scenario: data.full_scenario || '',
-      total_episodes: data.total_episodes || 10,
-      current_episode: 0,
-      status: 'active',
-      voice_id: data.voice_id || null,
-      style: data.style || 'anime',
-      language: data.language || 'ar'
+      user_id:         userId.toString(),
+      category:        data.category,
+      title:           data.title,
+      period:          data.period || '',
+      location:        data.location || '',
+      summary:         data.summary || '',
+      story_data:      data.story_data || {},
+      script_data:     data.script_data || {},
+      total_scenes:    data.total_scenes || 0,
+      status:          'pending',
+      language:        data.language || 'ar',
+      voice_id:        data.voice_id || null,
+      narrator_tone:   data.narrator_tone || 'dramatic',
+      // Duration fields
+      duration_minutes: data.duration_minutes || 3,
+      split_parts:      data.split_parts || 1,
+      scenes_per_part:  data.scenes_per_part || 7,
+      sec_per_scene:    data.sec_per_scene || 26
     })
     .select()
     .single();
   if (error) throw error;
-  return series;
+  return story;
 }
 
-export async function getUserSeries(userId, limit = 10) {
+export async function getUserStories(userId, limit = 15) {
   const { data, error } = await supabase
-    .from('series')
+    .from('stories')
     .select('*')
     .eq('user_id', userId.toString())
-    .eq('status', 'active')
+    .not('status', 'eq', 'deleted')
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
   return data || [];
 }
 
-export async function getSeriesById(seriesId) {
+export async function getStoryById(storyId) {
   const { data, error } = await supabase
-    .from('series')
+    .from('stories')
     .select('*')
-    .eq('id', seriesId)
+    .eq('id', storyId)
     .single();
   if (error?.code === 'PGRST116') return null;
   if (error) throw error;
   return data;
 }
 
-export async function updateSeries(seriesId, updates) {
+export async function updateStory(storyId, updates) {
   const { data, error } = await supabase
-    .from('series')
+    .from('stories')
     .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', seriesId)
+    .eq('id', storyId)
     .select()
     .single();
   if (error) throw error;
   return data;
 }
 
-export async function getAllActiveSeries() {
+export async function getAllActiveStories() {
   const { data, error } = await supabase
-    .from('series')
+    .from('stories')
     .select('*')
-    .eq('status', 'active')
+    .in('status', ['pending', 'video_ready'])
     .order('created_at', { ascending: true });
   if (error) throw error;
   return data || [];
 }
 
-// ─────────────────── EPISODES ───────────────────
-export async function createEpisode(seriesId, userId, episodeNumber, scenario, title = null) {
+// ═══════════════════════════════════════════════════════════════════
+// SCENES
+// ═══════════════════════════════════════════════════════════════════
+export async function createScene(storyId, userId, sceneData) {
   const { data, error } = await supabase
-    .from('episodes')
+    .from('scenes')
     .insert({
-      series_id: seriesId,
-      user_id: userId.toString(),
-      episode_number: episodeNumber,
-      title: title || `الحلقة ${episodeNumber}`,
-      scenario,
-      status: 'pending'
+      story_id:     storyId,
+      user_id:      userId.toString(),
+      scene_number: sceneData.number,
+      scene_title:  sceneData.scene_title,
+      narration:    sceneData.narration,
+      image_prompt: sceneData.image_prompt,
+      voice_tone:   sceneData.voice_tone || 'dramatic',
+      duration_sec: sceneData.duration_seconds || 26,
+      status:       'pending'
     })
     .select()
     .single();
@@ -126,53 +146,30 @@ export async function createEpisode(seriesId, userId, episodeNumber, scenario, t
   return data;
 }
 
-export async function getEpisode(episodeId) {
+export async function updateScene(sceneId, updates) {
   const { data, error } = await supabase
-    .from('episodes')
-    .select('*, series(*)')
-    .eq('id', episodeId)
-    .single();
-  if (error?.code === 'PGRST116') return null;
-  if (error) throw error;
-  return data;
-}
-
-export async function getNextPendingEpisode(seriesId) {
-  const { data, error } = await supabase
-    .from('episodes')
-    .select('*')
-    .eq('series_id', seriesId)
-    .eq('status', 'pending')
-    .order('episode_number', { ascending: true })
-    .limit(1)
-    .single();
-  if (error?.code === 'PGRST116') return null;
-  if (error) throw error;
-  return data;
-}
-
-export async function updateEpisode(episodeId, updates) {
-  const { data, error } = await supabase
-    .from('episodes')
+    .from('scenes')
     .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', episodeId)
+    .eq('id', sceneId)
     .select()
     .single();
   if (error) throw error;
   return data;
 }
 
-export async function getSeriesEpisodes(seriesId) {
+export async function getStoryScenes(storyId) {
   const { data, error } = await supabase
-    .from('episodes')
+    .from('scenes')
     .select('*')
-    .eq('series_id', seriesId)
-    .order('episode_number', { ascending: true });
+    .eq('story_id', storyId)
+    .order('scene_number', { ascending: true });
   if (error) throw error;
   return data || [];
 }
 
-// ─────────────────── YOUTUBE ───────────────────
+// ═══════════════════════════════════════════════════════════════════
+// YOUTUBE CHANNELS
+// ═══════════════════════════════════════════════════════════════════
 export async function getYouTubeChannel(userId) {
   const { data, error } = await supabase
     .from('youtube_channels')
@@ -185,18 +182,18 @@ export async function getYouTubeChannel(userId) {
   return data;
 }
 
-export async function saveYouTubeChannel(userId, clientId, clientSecret, refreshToken, channelId, channelTitle) {
+export async function saveYouTubeChannel(userId, channelData) {
   const { data, error } = await supabase
     .from('youtube_channels')
     .upsert({
-      user_id: userId.toString(),
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      channel_id: channelId,
-      channel_title: channelTitle,
-      is_active: true,
-      updated_at: new Date().toISOString()
+      user_id:       userId.toString(),
+      client_id:     channelData.clientId,
+      client_secret: channelData.clientSecret,
+      refresh_token: channelData.refreshToken,
+      channel_id:    channelData.channelId || null,
+      channel_title: channelData.channelTitle || null,
+      is_active:     true,
+      updated_at:    new Date().toISOString()
     }, { onConflict: 'user_id' })
     .select()
     .single();
@@ -204,53 +201,19 @@ export async function saveYouTubeChannel(userId, clientId, clientSecret, refresh
   return data;
 }
 
-// ─────────────────── GENERATION TASKS ───────────────────
-export async function createGenerationTask(episodeId, userId, chatId, type = 'video') {
-  const { data, error } = await supabase
-    .from('generation_tasks')
-    .insert({
-      episode_id: episodeId,
-      user_id: userId.toString(),
-      chat_id: chatId.toString(),
-      type,
-      status: 'pending'
-    })
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-export async function getTaskByExternalId(externalTaskId) {
-  const { data, error } = await supabase
-    .from('generation_tasks')
-    .select('*, episodes(*, series(*))')
-    .eq('external_task_id', externalTaskId)
-    .single();
-  if (error?.code === 'PGRST116') return null;
-  if (error) throw error;
-  return data;
-}
-
-export async function updateGenerationTask(taskId, updates) {
-  const { data, error } = await supabase
-    .from('generation_tasks')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', taskId)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-// ─────────────────── AUTO PUBLISH LOG ───────────────────
-export async function logAutoPublish(userId, seriesId, episodeId, action, status, details = {}) {
+// ═══════════════════════════════════════════════════════════════════
+// LOGGING
+// ═══════════════════════════════════════════════════════════════════
+export async function logAutoPublish(userId, storyId, action, status, details = {}) {
   await supabase.from('auto_publish_log').insert({
-    user_id: userId.toString(),
-    series_id: seriesId,
-    episode_id: episodeId,
-    action,
-    status,
-    details
-  });
+    user_id: userId.toString(), story_id: storyId, action, status, details
+  }).catch(() => {});
 }
+
+// ── Backwards compatibility aliases ──────────────────────────────────
+export const getUserSeries     = getUserStories;
+export const getSeriesById     = getStoryById;
+export const updateSeries      = updateStory;
+export const getAllActiveSeries = getAllActiveStories;
+export const getSeriesEpisodes = getStoryScenes;
+export const updateEpisode     = updateScene;
