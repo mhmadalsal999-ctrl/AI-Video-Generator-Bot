@@ -1,71 +1,72 @@
+/**
+ * youtubeService.js
+ * YouTube Data API v3 — upload videos to user channel
+ */
+
 import { google } from 'googleapis';
 import fs from 'fs-extra';
-import axios from 'axios';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { logger } from '../utils/logger.js';
+import axios from 'axios';
 import dotenv from 'dotenv';
 dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMP_DIR = path.join(__dirname, '../temp');
+fs.ensureDirSync(TEMP_DIR);
 
 function getOAuth2Client(clientId, clientSecret, refreshToken) {
-  const client = new google.auth.OAuth2(
-    clientId,
-    clientSecret,
-    'urn:ietf:wg:oauth:2.0:oob'
-  );
+  const client = new google.auth.OAuth2(clientId, clientSecret, 'urn:ietf:wg:oauth:2.0:oob');
   client.setCredentials({ refresh_token: refreshToken });
   return client;
 }
 
-/**
- * Upload video to YouTube as Shorts
- */
-export async function uploadToYouTube(videoPath, title, description, tags, clientId, clientSecret, refreshToken) {
-  logger.api(`Uploading to YouTube: ${title}`);
+// ── Upload video file ─────────────────────────────────────────────────
+async function uploadToYouTube(videoPath, title, description, tags, clientId, clientSecret, refreshToken) {
+  logger.api(`Uploading to YouTube: "${title}"`);
 
   const oauth2Client = getOAuth2Client(clientId, clientSecret, refreshToken);
   const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
+
+  const videoStream = fs.createReadStream(videoPath);
+  const fileSize = (await fs.stat(videoPath)).size;
 
   const response = await youtube.videos.insert({
     part: ['snippet', 'status'],
     requestBody: {
       snippet: {
-        title: title || 'AI Anime - الحلقة الجديدة',
-        description: description || 'حلقة أنيميشن مولدة بالذكاء الاصطناعي',
-        categoryId: '1',
-        tags: tags || ['أنيمي', 'AI', 'Shorts', 'anime', 'animation']
+        title: title.substring(0, 100),
+        description: description.substring(0, 5000),
+        tags: tags?.slice(0, 30) || [],
+        defaultLanguage: 'ar',
+        defaultAudioLanguage: 'ar'
       },
       status: {
         privacyStatus: 'public',
         selfDeclaredMadeForKids: false
       }
     },
-    media: { body: fs.createReadStream(videoPath) }
+    media: {
+      mimeType: 'video/mp4',
+      body: videoStream
+    }
   });
 
   const videoId = response.data.id;
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
   const shortsUrl = `https://www.youtube.com/shorts/${videoId}`;
-  logger.success('YOUTUBE', `Uploaded: ${shortsUrl}`);
 
-  return {
-    videoId,
-    url: `https://www.youtube.com/watch?v=${videoId}`,
-    shortsUrl
-  };
+  logger.success('YOUTUBE', `Uploaded: ${url}`);
+  return { videoId, url, shortsUrl };
 }
 
-/**
- * Upload from URL (download first, then upload)
- */
-export async function uploadFromUrl(videoUrl, title, description, tags, clientId, clientSecret, refreshToken) {
-  const fileName = `yt_upload_${Date.now()}.mp4`;
-  const filePath = path.join(TEMP_DIR, fileName);
-
+// ── Upload from Supabase Storage URL ─────────────────────────────────
+export async function uploadFromStorageUrl(videoUrl, title, description, tags, clientId, clientSecret, refreshToken) {
+  // Download file first
+  const filePath = path.join(TEMP_DIR, `yt_upload_${Date.now()}.mp4`);
   try {
-    logger.video('Downloading video for YouTube upload');
+    logger.api('Downloading video for YouTube upload');
     const response = await axios({ url: videoUrl, method: 'GET', responseType: 'stream', timeout: 300000 });
     const writer = fs.createWriteStream(filePath);
     await new Promise((res, rej) => {
@@ -73,17 +74,30 @@ export async function uploadFromUrl(videoUrl, title, description, tags, clientId
       writer.on('finish', res);
       writer.on('error', rej);
     });
-
-    const result = await uploadToYouTube(filePath, title, description, tags, clientId, clientSecret, refreshToken);
-    return result;
+    return await uploadToYouTube(filePath, title, description, tags, clientId, clientSecret, refreshToken);
   } finally {
     await fs.remove(filePath).catch(() => {});
   }
 }
 
-/**
- * Verify YouTube credentials
- */
+// ── Upload using env credentials ──────────────────────────────────────
+export async function uploadWithEnvCredentials(videoPathOrUrl, title, description, tags) {
+  const clientId     = process.env.YOUTUBE_CLIENT_ID;
+  const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
+  const refreshToken = process.env.YOUTUBE_REFRESH_TOKEN;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error('YouTube credentials not configured in environment variables');
+  }
+
+  // Check if it's a URL or a file path
+  if (videoPathOrUrl.startsWith('http')) {
+    return uploadFromStorageUrl(videoPathOrUrl, title, description, tags, clientId, clientSecret, refreshToken);
+  }
+  return uploadToYouTube(videoPathOrUrl, title, description, tags, clientId, clientSecret, refreshToken);
+}
+
+// ── Verify credentials ────────────────────────────────────────────────
 export async function verifyYouTubeCredentials(clientId, clientSecret, refreshToken) {
   try {
     const oauth2Client = getOAuth2Client(clientId, clientSecret, refreshToken);
@@ -95,20 +109,7 @@ export async function verifyYouTubeCredentials(clientId, clientSecret, refreshTo
       return { valid: true, channelTitle: ch.snippet.title, channelId: ch.id };
     }
     return { valid: false, error: 'القناة غير موجودة' };
-  } catch (e) {
-    return { valid: false, error: e.message };
+  } catch (err) {
+    return { valid: false, error: err.message };
   }
-}
-
-// Use env credentials if provided (for auto-publish)
-export async function uploadWithEnvCredentials(videoPath, title, description, tags) {
-  const clientId = process.env.YOUTUBE_CLIENT_ID;
-  const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
-  const refreshToken = process.env.YOUTUBE_REFRESH_TOKEN;
-
-  if (!clientId || !clientSecret || !refreshToken) {
-    throw new Error('YouTube env credentials not configured');
-  }
-
-  return uploadToYouTube(videoPath, title, description, tags, clientId, clientSecret, refreshToken);
 }
