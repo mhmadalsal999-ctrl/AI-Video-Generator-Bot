@@ -1,3 +1,10 @@
+/**
+ * groqService.js
+ * Core AI engine — Story research + narrator script + scene prompts
+ * Primary: Groq llama-3.3-70b-versatile
+ * Fallback: Groq llama-3.1-8b-instant
+ */
+
 import Groq from 'groq-sdk';
 import dotenv from 'dotenv';
 import { logger } from '../utils/logger.js';
@@ -5,131 +12,219 @@ dotenv.config();
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-const GENRES = {
-  horror: 'رعب مرعب',
-  action: 'أكشن ومغامرة',
-  romance: 'رومانسي',
-  comedy: 'كوميدي',
-  fantasy: 'خيال وسحر',
-  scifi: 'خيال علمي',
-  thriller: 'إثارة وتشويق',
-  drama: 'دراما عاطفية'
+const CATEGORY_LABELS = {
+  history:       'أحداث تاريخية موثقة',
+  crime:         'جرائم وألغاز حقيقية',
+  civilizations: 'حضارات قديمة',
+  wars:          'حروب ومعارك تاريخية',
+  figures:       'شخصيات أثرت في التاريخ',
+  secrets:       'أسرار وألغاز التاريخ',
+  arabic:        'قصص عربية وإسلامية موثقة',
+  disasters:     'كوارث وأحداث كبرى'
 };
 
-export async function generateSeriesScenario(title, genre, description, totalEpisodes = 10, language = 'ar') {
-  logger.api(`Generating series scenario: ${title}`);
+const TONE_MAP = {
+  history:       'رصين وجاد مع لمسة درامية',
+  crime:         'مشوق وغامض وتصاعدي',
+  civilizations: 'مبهر وملحمي',
+  wars:          'حاد ودرامي وإنساني',
+  figures:       'ملهم وانفعالي',
+  secrets:       'غامض وفضولي ومثير',
+  arabic:        'فصيح وبليغ مع إيقاع شعري',
+  disasters:     'حزين ومؤثر وإنساني'
+};
 
-  const genreLabel = GENRES[genre] || genre;
-  const langInstruction = language === 'ar' ? 'باللغة العربية' : 'in English';
+// ── Helper: call Groq with automatic model fallback ────────────────
+async function callGroq(messages, maxTokens = 3000) {
+  const models = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'gemma2-9b-it'];
+  for (const model of models) {
+    try {
+      const response = await groq.chat.completions.create({
+        model,
+        messages,
+        temperature: 0.8,
+        max_tokens: maxTokens
+      });
+      return response.choices[0]?.message?.content || '';
+    } catch (err) {
+      logger.warn('GROQ', `Model ${model} failed: ${err.message} — trying next`);
+    }
+  }
+  throw new Error('جميع نماذج Groq غير متاحة. تحقق من GROQ_API_KEY.');
+}
 
-  const prompt = `أنت كاتب سيناريو محترف لمسلسلات الأنيميشن.
-اكتب ${langInstruction} سيناريو كامل لمسلسل أنيميشن بعنوان "${title}" من نوع ${genreLabel}.
-${description ? `وصف المسلسل: ${description}` : ''}
+// ── Helper: safe JSON extraction ───────────────────────────────────
+function extractJSON(text) {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('No JSON found in Groq response');
+  return JSON.parse(match[0]);
+}
 
-المطلوب:
-1. ابتكر 3-4 شخصيات رئيسية ثابتة (اسم، وصف مظهر محدد جداً، شخصيتها)
-2. اكتب ملخصاً للقصة الرئيسية
-3. قسّم المسلسل إلى ${totalEpisodes} حلقات - كل حلقة فيها:
-   - عنوان الحلقة
-   - ملخص مختصر (2-3 جمل)
-   - مشهد أساسي يمكن تحويله لفيديو قصير 10-30 ثانية
+// ═══════════════════════════════════════════════════════════════════
+// 1. FIND A REAL HISTORICAL STORY
+// ═══════════════════════════════════════════════════════════════════
+export async function findHistoricalStory(category, language = 'ar', storyIndex = 0) {
+  logger.story(`Finding story: category=${category}, index=${storyIndex}`);
+  const categoryLabel = CATEGORY_LABELS[category] || category;
 
-أجب بصيغة JSON فقط بدون أي نص إضافي:
+  const prompt = `أنت باحث تاريخي محترف ومقدم برامج وثائقية متخصص في ${categoryLabel}.
+
+اختر قصة حقيقية موثقة تاريخياً من فئة "${categoryLabel}" تكون:
+- موثقة في كتب التاريخ المعتمدة (حقيقية 100%)
+- مثيرة ومشوقة وتجلب المشاهدات على يوتيوب
+- غنية بالتفاصيل والأحداث الدرامية
+- تحتوي على شخصيات واضحة وأماكن وأزمنة محددة
+${storyIndex > 0 ? `- اختر قصة مختلفة تماماً (الاختيار رقم ${storyIndex + 1})` : ''}
+
+أجب بـ JSON فقط بدون أي نص إضافي:
 {
-  "characters": [
-    {
-      "name": "اسم الشخصية",
-      "appearance": "وصف مظهر مفصل: لون الشعر، طول الشعر، لون العيون، الملابس المميزة، الجسم",
-      "personality": "وصف الشخصية",
-      "role": "الدور في القصة"
-    }
-  ],
-  "story_summary": "ملخص القصة الكاملة",
-  "episodes": [
-    {
-      "number": 1,
-      "title": "عنوان الحلقة",
-      "summary": "ملخص الحلقة",
-      "scene": "مشهد محدد للفيديو: من يظهر، ماذا يفعلون، الأحداث بالتفصيل"
-    }
-  ]
+  "title": "عنوان القصة الكامل",
+  "period": "الفترة الزمنية (مثال: القرن الثامن الميلادي)",
+  "location": "المكان الجغرافي",
+  "summary": "ملخص القصة في 4-5 جمل مشوقة",
+  "hook": "جملة افتتاحية جذابة تبدأ بسؤال أو مفاجأة",
+  "key_characters": [{"name": "الاسم", "role": "الدور في القصة"}],
+  "why_viral": "لماذا ستجلب مشاهدات كثيرة؟",
+  "tone": "tragic/mysterious/epic/inspiring/horror",
+  "category": "${category}"
 }`;
 
-  const response = await groq.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.8,
-    max_tokens: 4000
-  });
-
-  const text = response.choices[0]?.message?.content || '';
-
-  try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON found in response');
-    const parsed = JSON.parse(jsonMatch[0]);
-    logger.success('API', `Scenario generated: ${parsed.episodes?.length} episodes`);
-    return parsed;
-  } catch (e) {
-    logger.error('API', `Failed to parse scenario JSON: ${e.message}`);
-    throw new Error('فشل في توليد السيناريو. حاول مرة أخرى.');
-  }
+  const text = await callGroq([{ role: 'user', content: prompt }], 1500);
+  const story = extractJSON(text);
+  logger.story(`Found story: "${story.title}"`);
+  return story;
 }
 
-export async function generateVideoPrompt(episode, characters, genre) {
-  logger.api(`Generating video prompt for episode ${episode.episode_number}`);
+// ═══════════════════════════════════════════════════════════════════
+// 2. GENERATE SCRIPT WITH VARIABLE SCENE COUNT (based on duration)
+// ═══════════════════════════════════════════════════════════════════
+export async function generateStoryScript(story, language = 'ar', sceneCount = 7, secPerScene = 26) {
+  logger.story(`Generating script: ${sceneCount} scenes × ${secPerScene}s = ~${Math.round(sceneCount * secPerScene / 60)}min`);
 
-  const charDescriptions = characters.map(c => `${c.name}: ${c.appearance}`).join('\n');
-
-  const prompt = `أنت خبير في كتابة بروبمتات لتوليد فيديوهات أنيميشن.
-
-السيناريو: ${episode.scenario || episode.scene}
-
-الشخصيات الثابتة:
-${charDescriptions}
-
-اكتب بروبمت انجليزي احترافي لتوليد فيديو أنيميشن مدته 10-30 ثانية.
-البروبمت يجب أن:
-- يحتوي على وصف الشخصيات بالضبط (نفس الألوان والمظهر دائماً)
-- يصف المشهد والحركة والإضاءة
-- يكون أسلوب anime style، vibrant colors
-- لا يتجاوز 200 كلمة
-
-أجب بالبروبمت فقط بدون أي مقدمة:`;
-
-  const response = await groq.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.7,
-    max_tokens: 400
-  });
-
-  return response.choices[0]?.message?.content?.trim() || '';
-}
-
-export async function generateNarrationText(episode, characters, language = 'ar') {
-  logger.api(`Generating narration for episode ${episode.episode_number}`);
-
+  const tone = TONE_MAP[story.category] || 'درامي ومؤثر';
   const langNote = language === 'ar' ? 'باللغة العربية الفصحى' : 'in English';
 
-  const prompt = `اكتب نص تعليق صوتي ${langNote} لحلقة أنيميشن.
+  // Calculate word count per scene based on duration
+  // ~140 words per minute speaking speed
+  const wordsPerScene = Math.round((secPerScene / 60) * 140);
 
-السيناريو: ${episode.scenario}
+  const prompt = `أنت كاتب سيناريو وثائقي محترف على مستوى BBC وNational Geographic.
 
-المطلوب:
-- نص تعليق قصير (20-40 كلمة فقط)
-- مناسب لفيديو 10-30 ثانية
-- يصف المشهد بشكل درامي وجذاب
-- بدون أي إشارات مسرحية أو توجيهات
+اكتب سيناريو راوٍ ${langNote} لقصة: "${story.title}"
+الفترة: ${story.period || ''}
+المكان: ${story.location || ''}
+الملخص: ${story.summary}
+الطابع الصوتي: ${tone}
 
-أجب بالنص فقط:`;
+المطلوب بالضبط: ${sceneCount} مشاهد متسلسلة
+- كل مشهد: نص راوٍ (${wordsPerScene - 10} إلى ${wordsPerScene + 10} كلمة تقريباً)
+- مدة كل مشهد: ~${secPerScene} ثانية
+- النبرة تتصاعد: هادئة → متوترة → ذروة → خاتمة
+- وصف الصورة بالإنجليزية لتوليد صورة سينمائية واقعية
 
-  const response = await groq.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.7,
-    max_tokens: 200
-  });
+أجب بـ JSON فقط بدون أي نص إضافي:
+{
+  "title": "${story.title}",
+  "narrator_tone": "dramatic/solemn/intense/mysterious/inspiring",
+  "total_duration_seconds": ${sceneCount * secPerScene},
+  "intro_hook": "${story.hook || ''}",
+  "scenes": [
+    {
+      "number": 1,
+      "scene_title": "عنوان المشهد",
+      "narration": "نص الراوي ${langNote} كامل ومفصل",
+      "voice_tone": "calm/dramatic/intense/whisper/powerful",
+      "duration_seconds": ${secPerScene},
+      "image_prompt": "Cinematic historical photograph: [detailed scene description], dramatic lighting, photorealistic, 8K, no text, no watermarks",
+      "transition": "fade/cut"
+    }
+  ],
+  "outro": "جملة ختامية للفيديو"
+}`;
 
-  return response.choices[0]?.message?.content?.trim() || '';
+  const maxTokens = Math.min(500 + sceneCount * 400, 8000);
+  const text = await callGroq([{ role: 'user', content: prompt }], maxTokens);
+  const script = extractJSON(text);
+
+  logger.story(`Script generated: ${script.scenes?.length} scenes`);
+  return script;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 3. GENERATE SCRIPT PART (for split videos)
+// ═══════════════════════════════════════════════════════════════════
+export async function generateStoryScriptPart(story, language = 'ar', partNumber = 1, totalParts = 3, sceneCount = 7, secPerScene = 29) {
+  logger.story(`Generating script part ${partNumber}/${totalParts}`);
+
+  const tone = TONE_MAP[story.category] || 'درامي ومؤثر';
+  const langNote = language === 'ar' ? 'باللغة العربية الفصحى' : 'in English';
+  const wordsPerScene = Math.round((secPerScene / 60) * 140);
+
+  const partLabel =
+    partNumber === 1 ? 'البداية والتمهيد' :
+    partNumber === totalParts ? 'الذروة والنهاية' :
+    `الجزء الأوسط ${partNumber}`;
+
+  const prompt = `أنت كاتب سيناريو وثائقي محترف.
+
+القصة: "${story.title}" (${story.period || ''} — ${story.location || ''})
+${story.summary}
+
+اكتب الجزء ${partNumber} من ${totalParts} لهذه القصة ${langNote}.
+موضوع هذا الجزء: ${partLabel}
+الطابع الصوتي: ${tone}
+
+المطلوب: ${sceneCount} مشاهد (كل مشهد ~${wordsPerScene} كلمة لمدة ${secPerScene} ثانية)
+
+أجب بـ JSON فقط:
+{
+  "title": "${story.title} - الجزء ${partNumber}",
+  "narrator_tone": "dramatic/solemn/intense/mysterious",
+  "part_number": ${partNumber},
+  "total_parts": ${totalParts},
+  "scenes": [
+    {
+      "number": 1,
+      "scene_title": "عنوان المشهد",
+      "narration": "نص الراوي ${langNote}",
+      "voice_tone": "calm/dramatic/intense/powerful",
+      "duration_seconds": ${secPerScene},
+      "image_prompt": "Cinematic historical photograph: [detailed scene], dramatic lighting, photorealistic, 8K, no text"
+    }
+  ],
+  "outro": "جملة ختامية للجزء"
+}`;
+
+  const maxTokens = Math.min(500 + sceneCount * 400, 6000);
+  const text = await callGroq([{ role: 'user', content: prompt }], maxTokens);
+  const script = extractJSON(text);
+  return script;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 4. YOUTUBE METADATA
+// ═══════════════════════════════════════════════════════════════════
+export async function generateYouTubeMetadata(story, script, partNumber = null) {
+  const partLabel = partNumber ? ` - الجزء ${partNumber}` : '';
+
+  const prompt = `اكتب بيانات يوتيوب لفيديو وثائقي عن: "${story.title}${partLabel}"
+الملخص: ${story.summary || ''}
+
+أجب بـ JSON فقط:
+{
+  "title": "عنوان يوتيوب مشوق بالعربية (أقل من 100 حرف)",
+  "description": "وصف كامل بالعربية 150-300 كلمة مع هاشتاقات",
+  "tags": ["وسم1", "وسم2", "وسم3", "وسم4", "وسم5"]
+}`;
+
+  try {
+    const text = await callGroq([{ role: 'user', content: prompt }], 600);
+    return extractJSON(text);
+  } catch {
+    return {
+      title: `${story.title}${partLabel}`,
+      description: story.summary || '',
+      tags: ['تاريخ', 'قصص', 'وثائقي']
+    };
+  }
 }
