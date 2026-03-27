@@ -120,7 +120,12 @@ export async function generateStoryScript(story, language = 'ar', sceneCount = 7
 - كل مشهد: نص راوٍ (${wordsPerScene - 10} إلى ${wordsPerScene + 10} كلمة تقريباً)
 - مدة كل مشهد: ~${secPerScene} ثانية
 - النبرة تتصاعد: هادئة → متوترة → ذروة → خاتمة
-- وصف الصورة بالإنجليزية لتوليد صورة سينمائية واقعية
+
+⚠️ CRITICAL RULE FOR image_prompt:
+- image_prompt MUST be written in ENGLISH ONLY — no Arabic, no other language
+- image_prompt must be purely ASCII characters (a-z, 0-9, spaces, commas)
+- Format: "Cinematic historical [scene], [location], [lighting], [mood], photorealistic, 8K"
+- Example: "Cinematic historical battlefield, ancient Roman soldiers marching at dawn, dramatic golden lighting, photorealistic, 8K"
 
 أجب بـ JSON فقط بدون أي نص إضافي:
 {
@@ -135,7 +140,7 @@ export async function generateStoryScript(story, language = 'ar', sceneCount = 7
       "narration": "نص الراوي ${langNote} كامل ومفصل",
       "voice_tone": "calm/dramatic/intense/whisper/powerful",
       "duration_seconds": ${secPerScene},
-      "image_prompt": "Cinematic historical photograph: [detailed scene description], dramatic lighting, photorealistic, 8K, no text, no watermarks",
+      "image_prompt": "ENGLISH ONLY: Cinematic historical photograph of [scene in English], [location in English], dramatic lighting, photorealistic, 8K, no text",
       "transition": "fade/cut"
     }
   ],
@@ -189,7 +194,7 @@ ${story.summary}
       "narration": "نص الراوي ${langNote}",
       "voice_tone": "calm/dramatic/intense/powerful",
       "duration_seconds": ${secPerScene},
-      "image_prompt": "Cinematic historical photograph: [detailed scene], dramatic lighting, photorealistic, 8K, no text"
+      "image_prompt": "ENGLISH ONLY: Cinematic historical photograph of [scene in English], [location], dramatic lighting, photorealistic, 8K, no text"
     }
   ],
   "outro": "جملة ختامية للجزء"
