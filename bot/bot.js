@@ -10,21 +10,17 @@ const token = process.env.TELEGRAM_BOT_TOKEN;
 const CALLBACK_BASE_URL = process.env.CALLBACK_BASE_URL;
 
 if (!token) {
-  logger.error('BOT', 'TELEGRAM_BOT_TOKEN is missing');
+  logger.error('BOT', 'TELEGRAM_BOT_TOKEN is missing — cannot start');
   process.exit(1);
 }
 
-// في Render دائماً استخدم Webhook - يحل مشكلة 409
 const useWebhook = !!CALLBACK_BASE_URL;
-
 let bot;
 
 if (useWebhook) {
-  // Webhook mode - لا polling
   bot = new TelegramBot(token, { polling: false });
   logger.success('BOT', 'Bot initialized in WEBHOOK mode');
 } else {
-  // Polling mode - للتطوير المحلي فقط
   bot = new TelegramBot(token, {
     polling: {
       interval: 2000,
@@ -36,7 +32,6 @@ if (useWebhook) {
 }
 
 bot.on('error', (err) => {
-  // تجاهل أخطاء 409 في polling لأنها طبيعية عند التبديل
   if (!err.message?.includes('409')) {
     logger.error('BOT', err.message);
   }
@@ -44,7 +39,7 @@ bot.on('error', (err) => {
 
 bot.on('polling_error', (err) => {
   if (err.code === 'ETELEGRAM' && err.response?.body?.error_code === 409) {
-    logger.warn('BOT', '409 Conflict - another instance running. Set CALLBACK_BASE_URL to use Webhook.');
+    logger.warn('BOT', '409 Conflict — set CALLBACK_BASE_URL to use Webhook on Render');
   } else {
     logger.error('BOT', `Polling error: ${err.message}`);
   }
@@ -57,7 +52,7 @@ bot.on('message', async (msg) => {
   } catch (err) {
     logger.error('BOT', `Message handler error: ${err.message}`);
     try {
-      await bot.sendMessage(msg.chat.id, '❌ حدث خطأ. اضغط /start للمحاولة مرة أخرى.');
+      await bot.sendMessage(msg.chat.id, '❌ حدث خطأ مؤقت. اضغط /start للمحاولة مرة أخرى.');
     } catch (_) {}
   }
 });
@@ -69,7 +64,7 @@ bot.on('callback_query', async (query) => {
   } catch (err) {
     logger.error('BOT', `Callback handler error: ${err.message}`);
     try {
-      await bot.answerCallbackQuery(query.id, { text: '❌ حدث خطأ. حاول مرة أخرى.' });
+      await bot.answerCallbackQuery(query.id, { text: '❌ حدث خطأ، حاول مرة أخرى.' });
     } catch (_) {}
   }
 });
