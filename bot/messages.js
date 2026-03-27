@@ -1,14 +1,14 @@
-// ═══════════════════════════════════════════════════════════════
-//  messages.js  —  All keyboards + message templates
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// messages.js — All keyboards and message templates
+// Story Narrator Bot v3.0
+// ═══════════════════════════════════════════════════════════════════
 
-// ── Main reply keyboard ──────────────────────────────────────────
 export function mainKeyboard() {
   return {
     reply_markup: {
       keyboard: [
-        [{ text: '🎬 إنشاء مسلسل جديد' }, { text: '📺 مسلسلاتي' }],
-        [{ text: '📊 الإحصائيات' },         { text: '❓ مساعدة' }]
+        [{ text: '📖 قصة جديدة' },   { text: '📚 مكتبتي' }],
+        [{ text: '📺 إعداد يوتيوب' }, { text: '❓ مساعدة' }]
       ],
       resize_keyboard: true,
       one_time_keyboard: false
@@ -26,231 +26,284 @@ export function cancelKeyboard() {
   };
 }
 
-// ── Step 1: Genre ────────────────────────────────────────────────
-export function genreKeyboard() {
+// ── Story category selection ─────────────────────────────────────────
+export function categoryKeyboard() {
   return {
     reply_markup: {
       inline_keyboard: [
         [
-          { text: '👻 رعب',       callback_data: 'genre:horror' },
-          { text: '⚔️ أكشن',      callback_data: 'genre:action' }
+          { text: '🏛️ تاريخية موثقة',      callback_data: 'cat:history' },
+          { text: '🔍 جرائم وألغاز',         callback_data: 'cat:crime' }
         ],
         [
-          { text: '💕 رومانسي',   callback_data: 'genre:romance' },
-          { text: '😄 كوميدي',    callback_data: 'genre:comedy' }
+          { text: '🌍 حضارات قديمة',         callback_data: 'cat:civilizations' },
+          { text: '⚔️ حروب ومعارك',           callback_data: 'cat:wars' }
         ],
         [
-          { text: '🧙 خيال وسحر', callback_data: 'genre:fantasy' },
-          { text: '🚀 خيال علمي', callback_data: 'genre:scifi' }
+          { text: '👑 شخصيات أثّرت',          callback_data: 'cat:figures' },
+          { text: '🕵️ أسرار التاريخ',         callback_data: 'cat:secrets' }
         ],
         [
-          { text: '🔥 إثارة',     callback_data: 'genre:thriller' },
-          { text: '💔 دراما',     callback_data: 'genre:drama' }
+          { text: '🌙 قصص عربية وإسلامية',   callback_data: 'cat:arabic' },
+          { text: '🌊 كوارث وأحداث كبرى',    callback_data: 'cat:disasters' }
         ]
       ]
     }
   };
 }
 
-// ── Step 3: Episodes count ───────────────────────────────────────
-export function episodesCountKeyboard() {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '5️⃣  5 حلقات',  callback_data: 'episodes:5' },
-          { text: '🔟 10 حلقات',  callback_data: 'episodes:10' }
-        ],
-        [
-          { text: '🔢 15 حلقة',   callback_data: 'episodes:15' },
-          { text: '🔣 20 حلقة',   callback_data: 'episodes:20' }
-        ],
-        [
-          { text: '🔙 رجوع',       callback_data: 'back:genre' }
-        ]
-      ]
-    }
-  };
-}
-
-// ── After scenario generated: action buttons ─────────────────────
-export function scenarioActionsKeyboard(seriesId) {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '🎬 إنشاء الحلقة الأولى',   callback_data: `create_ep:${seriesId}:1` },
-          { text: '📋 عرض جميع الحلقات',       callback_data: `episodes_list:${seriesId}` }
-        ],
-        [
-          { text: '▶️ نشر الحلقة الأولى الآن', callback_data: `publish_now:${seriesId}` }
-        ],
-        [
-          { text: '🔄 إعادة توليد السيناريو',  callback_data: `regen_scenario:${seriesId}` },
-          { text: '🗑️ حذف هذا المسلسل',        callback_data: `delete_series:${seriesId}` }
-        ],
-        [
-          { text: '🏠 القائمة الرئيسية',        callback_data: 'back:main' }
-        ]
-      ]
-    }
-  };
-}
-
-// ── Episode detail actions ────────────────────────────────────────
-export function episodeActionsKeyboard(seriesId, episodeId, hasVideo) {
-  const buttons = [];
-
-  if (hasVideo) {
-    buttons.push([
-      { text: '▶️ نشر هذه الحلقة',       callback_data: `publish_ep:${seriesId}:${episodeId}` },
-      { text: '👁️ معاينة السيناريو',       callback_data: `view_ep_scenario:${episodeId}` }
-    ]);
-  } else {
-    buttons.push([
-      { text: '🎬 توليد فيديو الحلقة',    callback_data: `create_ep:${seriesId}:${episodeId}` },
-      { text: '👁️ معاينة السيناريو',       callback_data: `view_ep_scenario:${episodeId}` }
-    ]);
-  }
-
-  buttons.push([
-    { text: '🔙 العودة للحلقات',           callback_data: `episodes_list:${seriesId}` }
-  ]);
-
-  return { reply_markup: { inline_keyboard: buttons } };
-}
-
-// ── My series list ────────────────────────────────────────────────
-export function seriesListKeyboard(seriesList) {
-  const rows = seriesList.map(s => {
-    const statusEmoji = s.status === 'active' ? '🟢' : s.status === 'completed' ? '✅' : '🔴';
-    return [{
-      text: `${statusEmoji} ${s.title}  (${s.current_episode}/${s.total_episodes})`,
-      callback_data: `series:${s.id}`
-    }];
-  });
-  rows.push([{ text: '🏠 القائمة الرئيسية', callback_data: 'back:main' }]);
-  return { reply_markup: { inline_keyboard: rows } };
-}
-
-// ── Single series actions ─────────────────────────────────────────
-export function seriesActionsKeyboard(seriesId) {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '🎬 إنشاء الحلقة التالية', callback_data: `publish_now:${seriesId}` },
-          { text: '📋 الحلقات',              callback_data: `episodes_list:${seriesId}` }
-        ],
-        [
-          { text: '📖 عرض السيناريو الكامل', callback_data: `view_scenario:${seriesId}` },
-          { text: '🗑️ حذف',                  callback_data: `delete_series:${seriesId}` }
-        ],
-        [
-          { text: '🔙 مسلسلاتي',             callback_data: 'back:my_series' }
-        ]
-      ]
-    }
-  };
-}
-
-// ── Confirm dialog ────────────────────────────────────────────────
-export function confirmKeyboard(action) {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '✅ نعم، تأكيد', callback_data: `confirm:${action}` },
-          { text: '❌ إلغاء',      callback_data: 'cancel:action' }
-        ]
-      ]
-    }
-  };
-}
-
-// ── Language keyboard ─────────────────────────────────────────────
+// ── Language selection ───────────────────────────────────────────────
 export function languageKeyboard() {
   return {
     reply_markup: {
       inline_keyboard: [
         [
-          { text: '🇸🇦 عربي',   callback_data: 'lang:ar' },
-          { text: '🇺🇸 English', callback_data: 'lang:en' }
-        ],
-        [{ text: '🔙 رجوع', callback_data: 'back:episodes' }]
+          { text: '🇸🇦 عربي (فصيح)',  callback_data: 'lang:ar' },
+          { text: '🇺🇸 English',      callback_data: 'lang:en' }
+        ]
       ]
     }
   };
 }
 
-// ── Voice keyboard ────────────────────────────────────────────────
-export function voiceKeyboard(voices = []) {
-  const rows = [];
-  for (let i = 0; i < Math.min(voices.length, 6); i += 2) {
-    const row = [{ text: `🎙️ ${voices[i].name}`, callback_data: `voice:${voices[i].id}` }];
-    if (voices[i + 1]) {
-      row.push({ text: `🎙️ ${voices[i + 1].name}`, callback_data: `voice:${voices[i + 1].id}` });
+// ── Video duration selection (NEW) ───────────────────────────────────
+export function durationKeyboard() {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '⚡ 1 دقيقة  (3 مشاهد)',  callback_data: 'dur:1' },
+          { text: '🎬 2 دقيقتين (5 مشاهد)', callback_data: 'dur:2' }
+        ],
+        [
+          { text: '📽️ 3 دقائق  (7 مشاهد)',  callback_data: 'dur:3' },
+          { text: '🎥 5 دقائق (11 مشهد)',   callback_data: 'dur:5' }
+        ],
+        [
+          { text: '🎞️ 10 دقائق (3 أجزاء × 7 مشاهد)', callback_data: 'dur:10' }
+        ],
+        [
+          { text: '◀️ رجوع',  callback_data: 'back:lang' }
+        ]
+      ]
     }
-    rows.push(row);
-  }
-  rows.push([{ text: '⏩ صوت افتراضي', callback_data: 'voice:default' }]);
-  rows.push([{ text: '🔙 رجوع', callback_data: 'back:lang' }]);
-  return { reply_markup: { inline_keyboard: rows } };
+  };
 }
 
-// ── YouTube setup ─────────────────────────────────────────────────
+// ── Split confirmation for long videos (NEW) ─────────────────────────
+export function splitKeyboard() {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '📦 3 فيديوهات منفصلة (موصى به)', callback_data: 'split:yes' }
+        ],
+        [
+          { text: '🎬 فيديو واحد طويل (10 دق)', callback_data: 'split:no' }
+        ],
+        [
+          { text: '◀️ تغيير المدة', callback_data: 'back:duration' }
+        ]
+      ]
+    }
+  };
+}
+
+// ── Story preview actions ────────────────────────────────────────────
+export function storyPreviewKeyboard(storyId) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '✅ إنشاء الفيديو',    callback_data: `generate:${storyId}` },
+          { text: '🔄 قصة أخرى',        callback_data: `another:${storyId}` }
+        ],
+        [
+          { text: '📝 عرض السيناريو',   callback_data: `script:${storyId}` }
+        ],
+        [
+          { text: '🏠 القائمة الرئيسية', callback_data: 'back:main' }
+        ]
+      ]
+    }
+  };
+}
+
+// ── After video generated ────────────────────────────────────────────
+export function afterVideoKeyboard(storyId, hasYoutube = false) {
+  const buttons = [
+    [{ text: '📖 قصة جديدة', callback_data: 'new:story' }]
+  ];
+  if (hasYoutube) {
+    buttons.unshift([{ text: '📺 نشر على يوتيوب', callback_data: `publish:${storyId}` }]);
+  }
+  buttons.push([{ text: '🏠 القائمة الرئيسية', callback_data: 'back:main' }]);
+  return { reply_markup: { inline_keyboard: buttons } };
+}
+
+// ── Story library ────────────────────────────────────────────────────
+export function storiesListKeyboard(stories) {
+  const buttons = stories.map(s => {
+    const emoji = { video_ready: '🎬', published: '✅', pending: '⏳', generating: '🔄', failed: '❌' }[s.status] || '📖';
+    const mins = s.duration_minutes ? ` (${s.duration_minutes}د)` : '';
+    const title = s.title.length > 25 ? s.title.substring(0, 22) + '...' : s.title;
+    return [{ text: `${emoji} ${title}${mins}`, callback_data: `story:${s.id}` }];
+  });
+  buttons.push([{ text: '🏠 القائمة الرئيسية', callback_data: 'back:main' }]);
+  return { reply_markup: { inline_keyboard: buttons } };
+}
+
+// ── Story detail actions ─────────────────────────────────────────────
+export function storyDetailKeyboard(story) {
+  const buttons = [];
+  if (story.status === 'video_ready' || story.status === 'published') {
+    buttons.push([{ text: '🎬 إرسال الفيديو مجدداً', callback_data: `resend:${story.id}` }]);
+    if (!story.youtube_url) {
+      buttons.push([{ text: '📺 نشر على يوتيوب', callback_data: `publish:${story.id}` }]);
+    }
+  }
+  if (['pending', 'failed'].includes(story.status)) {
+    buttons.push([{ text: '🔄 إعادة الإنشاء', callback_data: `generate:${story.id}` }]);
+  }
+  buttons.push(
+    [{ text: '📝 عرض السيناريو', callback_data: `script:${story.id}` }],
+    [{ text: '🗑️ حذف', callback_data: `delete:${story.id}` }, { text: '◀️ رجوع', callback_data: 'back:library' }]
+  );
+  return { reply_markup: { inline_keyboard: buttons } };
+}
+
+// ── Confirm keyboard ─────────────────────────────────────────────────
+export function confirmKeyboard(action, itemId) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '✅ نعم، تأكيد', callback_data: `confirm:${action}:${itemId}` },
+          { text: '❌ إلغاء',      callback_data: 'back:main' }
+        ]
+      ]
+    }
+  };
+}
+
+// ── YouTube setup keyboard ────────────────────────────────────────────
 export function youtubeSetupKeyboard() {
   return {
     reply_markup: {
       inline_keyboard: [
-        [{ text: '🔑 ربط قناة يوتيوب (OAuth)', callback_data: 'yt_setup:manual' }],
-        [{ text: '🏠 القائمة الرئيسية',         callback_data: 'back:main' }]
+        [{ text: '🔧 ربط قناتي',              callback_data: 'yt:setup' }],
+        [{ text: '❓ كيف أحصل على البيانات؟', callback_data: 'yt:help' }],
+        [{ text: '🏠 رجوع',                    callback_data: 'back:main' }]
       ]
     }
   };
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MESSAGES
-// ═══════════════════════════════════════════════════════════════
+// ── Voice selection keyboard ──────────────────────────────────────────
+export function voiceKeyboard() {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '🎙️ صوت درامي قوي',  callback_data: 'voice:pNInz6obpgDQGcFmaJgB' },
+          { text: '🎙️ صوت مشوق متوتر', callback_data: 'voice:TxGEqnHWrfWFTfGW9XjX' }
+        ],
+        [
+          { text: '🎙️ صوت ملحمي حاد',  callback_data: 'voice:VR6AewLTigWG4xSOukaG' },
+          { text: '🎙️ صوت هادئ رصين',  callback_data: 'voice:ErXwobaYiN019PkySvjV' }
+        ],
+        [{ text: '⏭️ تخطي (افتراضي)',   callback_data: 'voice:default' }]
+      ]
+    }
+  };
+}
 
-export const WELCOME_MSG = `🎌 *أهلاً وسهلاً — بوت الأنيميشن الذكي!*
+export function backToMainKeyboard() {
+  return {
+    reply_markup: {
+      inline_keyboard: [[{ text: '🏠 القائمة الرئيسية', callback_data: 'back:main' }]]
+    }
+  };
+}
 
-أنا قادر على إنشاء مسلسلات أنيميشن كاملة من الصفر:
+// ═══════════════════════════════════════════════════════════════════
+// DURATION CONFIG (exported for use in handlers)
+// ═══════════════════════════════════════════════════════════════════
+export const DURATION_CONFIG = {
+  '1':  { label: '1 دقيقة',    scenes: 3,  secPerScene: 20, split: 1 },
+  '2':  { label: '2 دقيقتين',  scenes: 5,  secPerScene: 24, split: 1 },
+  '3':  { label: '3 دقائق',    scenes: 7,  secPerScene: 26, split: 1 },
+  '5':  { label: '5 دقائق',    scenes: 11, secPerScene: 27, split: 1 },
+  '10': { label: '10 دقائق',   scenes: 21, secPerScene: 29, split: 3 }
+};
 
-✨ *ما يقدر يسويه البوت:*
-🎭 توليد سيناريو احترافي بالكامل مع شخصيات ثابتة
-🖼️ توليد صور وفيديوهات لكل حلقة
-🎙️ تعليق صوتي بأصوات احترافية
-📅 نشر تلقائي يومي على يوتيوب
+// ═══════════════════════════════════════════════════════════════════
+// MESSAGE TEMPLATES
+// ═══════════════════════════════════════════════════════════════════
+export const WELCOME_MSG = `📖 *أهلاً في بوت راوي القصص التاريخية!*
 
-─────────────────────
-اضغط 👇 لتبدأ رحلتك!`;
+أنا أبحث عن قصص حقيقية موثقة وأحولها لمحتوى يوتيوب احترافي:
+
+✨ *ما يفعله البوت تلقائياً:*
+🔍 يبحث عن قصة تاريخية حقيقية مثيرة
+⏱️ تختار مدة الفيديو (1 — 10 دقائق)
+📝 يكتب سيناريو راوٍ بعدد مشاهد مناسب
+🖼️ يولد صور سينمائية واقعية لكل مشهد
+🎙️ يولد صوت راوٍ احترافي بنبرة تناسب القصة
+🎵 يضيف موسيقى خلفية خفيفة
+🎬 يُرسل فيديو يوتيوب كامل جاهز للنشر
+
+─────────────────────────
+اضغط 👇 لتبدأ!`;
 
 export const HELP_MSG = `❓ *دليل الاستخدام الكامل*
 
-*📌 الخطوات:*
-1️⃣ اختر نوع المسلسل (رعب، أكشن...)
-2️⃣ أدخل اسم المسلسل
-3️⃣ حدد عدد الحلقات
-4️⃣ أضف وصفاً مختصراً *(اختياري)*
-5️⃣ شاهد السيناريو الكامل يُولَّد تلقائياً!
-6️⃣ اضغط "إنشاء الحلقة" أو "نشر الآن"
+*📌 خطوات إنشاء فيديو:*
+1️⃣ اضغط "📖 قصة جديدة"
+2️⃣ اختر فئة القصة (جرائم / تاريخ / حروب...)
+3️⃣ اختر لغة الراوي (عربي / English)
+4️⃣ اختر مدة الفيديو (1 — 10 دقائق)
+5️⃣ البوت يبحث ويعرض ملخص القصة
+6️⃣ اضغط "✅ إنشاء الفيديو" — الباقي تلقائي!
+
+*⏱️ مدد الفيديو المتاحة:*
+⚡ 1 دقيقة — 3 مشاهد
+🎬 2 دقيقتين — 5 مشاهد
+📽️ 3 دقائق — 7 مشاهد
+🎥 5 دقائق — 11 مشهد
+🎞️ 10 دقائق — 3 أجزاء منفصلة
 
 *⚡ التقنيات:*
-• Groq AI — توليد السيناريو
-• Pollinations.ai FLUX — توليد الصور
-• ElevenLabs — التعليق الصوتي  
-• FFmpeg — دمج الفيديو والصوت
-• YouTube API — النشر التلقائي`;
+• Groq AI — بحث القصص وكتابة السيناريو
+• Pollinations.ai FLUX — توليد الصور (مجاني بدون API)
+• ElevenLabs — الصوت الاحترافي
+• FFmpeg — مونتاج + موسيقى خلفية
 
-// Progress indicator for multi-step creation
-export function stepHeader(step, total, title) {
-  const filled = '█'.repeat(step);
-  const empty = '░'.repeat(total - step);
-  return `${filled}${empty}  ${step}/${total}\n*${title}*\n\n`;
-}
+*⏱️ وقت الإنشاء التقريبي:*
+• 1 دقيقة → ~2 دقيقة انتظار
+• 3 دقائق → ~5 دقائق انتظار
+• 10 دقائق → ~12 دقيقة (3 أجزاء)`;
 
-export function newSeriesMsg(step, total) {
-  return `📝 *إنشاء مسلسل جديد (${step}/${total})*\n\n`;
-}
+export const CATEGORY_LABELS = {
+  history:       '🏛️ تاريخية موثقة',
+  crime:         '🔍 جرائم وألغاز',
+  civilizations: '🌍 حضارات قديمة',
+  wars:          '⚔️ حروب ومعارك',
+  figures:       '👑 شخصيات أثّرت',
+  secrets:       '🕵️ أسرار التاريخ',
+  arabic:        '🌙 عربية وإسلامية',
+  disasters:     '🌊 كوارث وأحداث'
+};
+
+export const STATUS_LABELS = {
+  pending:     '⏳ في الانتظار',
+  generating:  '🔄 قيد الإنشاء',
+  video_ready: '🎬 فيديو جاهز',
+  published:   '✅ منشور',
+  failed:      '❌ فشل'
+};
+
+// Backwards compat aliases
+export { storyPreviewKeyboard as scenarioActionsKeyboard };
+export { storiesListKeyboard as seriesListKeyboard };
+export { storyDetailKeyboard as seriesActionsKeyboard };
