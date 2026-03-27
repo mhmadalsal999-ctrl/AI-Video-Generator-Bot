@@ -1,56 +1,60 @@
 /**
  * callbackHandler.js
- * Handles all inline keyboard button presses
+ * Full callback handler with duration selection + split video support
  */
 
 import {
   getUserState, setUserState,
-  getUserSeries, getSeriesById, updateSeries,
-  getSeriesEpisodes, getEpisode,
-  getYouTubeChannel, updateEpisode
+  getUserStories, getStoryById, updateStory,
+  createStory, getYouTubeChannel, logAutoPublish
 } from '../../db/database.js';
 import {
-  mainKeyboard, cancelKeyboard,
-  genreKeyboard, episodesCountKeyboard, languageKeyboard, voiceKeyboard,
-  seriesListKeyboard, seriesActionsKeyboard, episodeActionsKeyboard,
-  scenarioActionsKeyboard, confirmKeyboard, youtubeSetupKeyboard, stepHeader
+  mainKeyboard, categoryKeyboard, languageKeyboard,
+  durationKeyboard, splitKeyboard,
+  storiesListKeyboard, storyDetailKeyboard, storyPreviewKeyboard,
+  afterVideoKeyboard, youtubeSetupKeyboard, confirmKeyboard, backToMainKeyboard,
+  WELCOME_MSG, CATEGORY_LABELS, STATUS_LABELS, DURATION_CONFIG
 } from '../messages.js';
-import { FREE_VOICES } from '../../services/elevenLabsService.js';
-import { triggerManualPublish } from '../../services/cronScheduler.js';
-import { generateEpisodeVideo } from '../../services/videoPipeline.js';
+import {
+  findHistoricalStory, generateStoryScript,
+  generateStoryScriptPart, generateYouTubeMetadata
+} from '../../services/groqService.js';
+import { generateStoryVideo, generateSplitVideos } from '../../services/videoPipeline.js';
+import { uploadWithEnvCredentials } from '../../services/youtubeService.js';
+import { uploadVideoToStorage } from '../../utils/storage.js';
 import { logger } from '../../utils/logger.js';
+import { STATES } from './messageHandler.js';
+import fs from 'fs-extra';
 
-const STATES = {
-  IDLE:             'idle',
-  NEW_SERIES_TITLE: 'new_series_title',
-  NEW_SERIES_DESC:  'new_series_desc',
-  YT_CLIENT_ID:     'yt_client_id',
-  YT_CLIENT_SECRET: 'yt_client_secret',
-  YT_REFRESH_TOKEN: 'yt_refresh_token'
-};
-
-const GENRE_LABELS = {
-  horror: '👻 رعب', action: '⚔️ أكشن', romance: '💕 رومانسي',
-  comedy: '😄 كوميدي', fantasy: '🧙 خيال وسحر', scifi: '🚀 خيال علمي',
-  thriller: '🔥 إثارة', drama: '💔 دراما'
-};
-
-const STATUS_EMOJI = {
-  published:   '✅',
-  pending:     '⏳',
-  generating:  '🔄',
-  failed:      '❌',
-  video_ready: '🎬'
-};
-
-// ── Helper: safe edit message ────────────────────────────────────
+// ── Safe edit helper ──────────────────────────────────────────────────
 async function safeEdit(bot, chatId, msgId, text, options = {}) {
   try {
-    await bot.editMessageText(text, { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown', ...options });
+    await bot.editMessageText(text, {
+      chat_id: chatId,
+      message_id: msgId,
+      parse_mode: 'Markdown',
+      ...options
+    });
   } catch (_) {}
 }
 
-// ════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// SEND PROGRESS MESSAGE (updates same message)
+// ═══════════════════════════════════════════════════════════════════
+function makeProgressCallback(bot, chatId, msgId, storyTitle) {
+  return async (msg) => {
+    try {
+      await bot.editMessageText(
+        `🎬 *${storyTitle}*\n\n${msg}`,
+        { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown' }
+      );
+    } catch (_) {}
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// MAIN HANDLER
+// ═══════════════════════════════════════════════════════════════════
 export async function handleCallbackQuery(bot, query) {
   const chatId = query.message.chat.id;
   const userId = query.from.id.toString();
@@ -58,375 +62,344 @@ export async function handleCallbackQuery(bot, query) {
   const msgId  = query.message.message_id;
 
   await bot.answerCallbackQuery(query.id).catch(() => {});
-  logger.bot(`Callback ${userId}: ${data}`);
+  logger.bot(`CB ${userId}: ${data}`);
 
   const stateData = await getUserState(userId);
   const tempData  = stateData?.temp_data || {};
 
-  // ── STEP 1: Genre selection ──────────────────────────────────
-  if (data.startsWith('genre:')) {
-    const genre   = data.split(':')[1];
-    const updated = { genre };
-    await setUserState(userId, STATES.IDLE, updated);
-
+  // ──────────────────────────────────────────────────────────────────
+  // STEP 1: CATEGORY
+  // ──────────────────────────────────────────────────────────────────
+  if (data.startsWith('cat:')) {
+    const category = data.split(':')[1];
+    await setUserState(userId, STATES.IDLE, { category });
     await safeEdit(
       bot, chatId, msgId,
-      `✅ *النوع:* ${GENRE_LABELS[genre] || genre}\n\n` +
-      stepHeader(2, 4, 'الخطوة 2 من 4 — كم حلقة تريد؟') +
-      'اختر عدد الحلقات للمسلسل:',
-      episodesCountKeyboard()
-    );
-    return;
-  }
-
-  // ── STEP 2: Episodes count ───────────────────────────────────
-  if (data.startsWith('episodes:')) {
-    const count   = parseInt(data.split(':')[1]);
-    const updated = { ...tempData, total_episodes: count };
-    await setUserState(userId, STATES.IDLE, updated);
-
-    await safeEdit(
-      bot, chatId, msgId,
-      `✅ *النوع:* ${GENRE_LABELS[tempData.genre] || tempData.genre}\n` +
-      `✅ *الحلقات:* ${count} حلقة\n\n` +
-      stepHeader(3, 4, 'الخطوة 3 من 4 — اختر اللغة'),
+      `${CATEGORY_LABELS[category]}\n\n*اختر لغة الراوي:*`,
       languageKeyboard()
     );
     return;
   }
 
-  // ── STEP 3: Language ─────────────────────────────────────────
+  // ──────────────────────────────────────────────────────────────────
+  // STEP 2: LANGUAGE → show duration keyboard
+  // ──────────────────────────────────────────────────────────────────
   if (data.startsWith('lang:')) {
-    const lang    = data.split(':')[1];
-    const updated = { ...tempData, language: lang };
-    await setUserState(userId, STATES.NEW_SERIES_TITLE, updated);
-
-    const langLabel = lang === 'ar' ? '🇸🇦 عربي' : '🇺🇸 English';
+    const language = data.split(':')[1];
+    const category = tempData.category;
+    if (!category) {
+      await safeEdit(bot, chatId, msgId, '❌ اختر الفئة أولاً.', categoryKeyboard());
+      return;
+    }
+    await setUserState(userId, STATES.IDLE, { ...tempData, language });
     await safeEdit(
       bot, chatId, msgId,
-      `✅ *النوع:* ${GENRE_LABELS[tempData.genre] || tempData.genre}\n` +
-      `✅ *الحلقات:* ${tempData.total_episodes} حلقة\n` +
-      `✅ *اللغة:* ${langLabel}\n\n` +
-      stepHeader(4, 4, 'الخطوة 4 من 4 — اسم المسلسل') +
-      '✏️ الآن *اكتب اسم المسلسل* في الرسالة التالية:\n\n_مثال: أبطال المجرة · ظلام الليل · حارسة القمر_'
+      `⏱️ *اختر مدة الفيديو:*\n\nكل مدة تحدد عدد المشاهد وطول السيناريو تلقائياً.`,
+      durationKeyboard()
     );
     return;
   }
 
-  // ── Series: view details ─────────────────────────────────────
-  if (data.startsWith('series:')) {
-    const seriesId = parseInt(data.split(':')[1]);
-    const series   = await getSeriesById(seriesId);
-    if (!series) return bot.sendMessage(chatId, '❌ المسلسل غير موجود.');
+  // ──────────────────────────────────────────────────────────────────
+  // STEP 3: DURATION
+  // ──────────────────────────────────────────────────────────────────
+  if (data.startsWith('dur:')) {
+    const durKey = data.split(':')[1];
+    const durCfg = DURATION_CONFIG[durKey];
+    if (!durCfg) return;
 
-    const episodes  = await getSeriesEpisodes(seriesId);
-    const published = episodes.filter(e => e.status === 'published').length;
-    const failed    = episodes.filter(e => e.status === 'failed').length;
-    const pending   = episodes.filter(e => e.status === 'pending').length;
-    const progress  = Math.round((published / (series.total_episodes || 1)) * 10);
-    const bar       = '█'.repeat(progress) + '░'.repeat(10 - progress);
+    await setUserState(userId, STATES.IDLE, { ...tempData, durKey, durCfg });
 
-    await safeEdit(
-      bot, chatId, msgId,
-      `📺 *${series.title}*\n` +
-      `${GENRE_LABELS[series.genre] || series.genre}\n\n` +
-      `📊 التقدم: [${bar}] ${published}/${series.total_episodes}\n\n` +
-      `✅ منشورة: *${published}*  ⏳ معلقة: *${pending}*  ❌ فاشلة: *${failed}*`,
-      seriesActionsKeyboard(seriesId)
-    );
-    return;
-  }
-
-  // ── Episodes list ────────────────────────────────────────────
-  if (data.startsWith('episodes_list:')) {
-    const seriesId = parseInt(data.split(':')[1]);
-    const episodes = await getSeriesEpisodes(seriesId);
-    const series   = await getSeriesById(seriesId);
-
-    if (!episodes.length) {
-      await safeEdit(bot, chatId, msgId, '📭 لا توجد حلقات بعد.');
+    if (durKey === '10') {
+      // Ask split preference for 10-minute videos
+      await safeEdit(
+        bot, chatId, msgId,
+        `🎞️ *فيديو 10 دقائق محدد!*\n\n*كيف تريد توزيعه؟*\n\n📦 *3 أجزاء منفصلة* (موصى به لليوتيوب)\nكل جزء ~3-4 دقائق — أكثر مشاهدات\n\n🎬 *فيديو واحد* (~10 دقائق)\nملف واحد كامل`,
+        splitKeyboard()
+      );
       return;
     }
 
-    const rows = episodes.map(e => [{
-      text: `${STATUS_EMOJI[e.status] || '⏳'} ${e.episode_number}. ${e.title}`,
-      callback_data: `ep_detail:${seriesId}:${e.id}`
-    }]);
-    rows.push([{ text: '🔙 رجوع للمسلسل', callback_data: `series:${seriesId}` }]);
-
-    await safeEdit(
-      bot, chatId, msgId,
-      `📋 *حلقات "${series?.title || ''}"*\n\n` +
-      `اضغط على حلقة للتفاصيل والإجراءات:`,
-      { reply_markup: { inline_keyboard: rows } }
-    );
+    // Duration ≤ 5 min → search directly
+    await searchAndShowStory(bot, chatId, msgId, userId, { ...tempData, durKey, durCfg, splitMode: false });
     return;
   }
 
-  // ── Episode detail ───────────────────────────────────────────
-  if (data.startsWith('ep_detail:')) {
-    const [, seriesId, episodeId] = data.split(':');
-    const episode = await getEpisode(parseInt(episodeId));
-    if (!episode) return bot.sendMessage(chatId, '❌ الحلقة غير موجودة.');
-
-    const hasVideo = episode.status === 'published' || episode.status === 'video_ready';
-    const statusText = {
-      published:   '✅ منشورة على يوتيوب',
-      pending:     '⏳ في الانتظار',
-      generating:  '🔄 جاري التوليد',
-      failed:      '❌ فشلت',
-      video_ready: '🎬 جاهزة للنشر'
-    };
-
-    await safeEdit(
-      bot, chatId, msgId,
-      `🎬 *الحلقة ${episode.episode_number}: ${episode.title}*\n\n` +
-      `📊 الحالة: ${statusText[episode.status] || episode.status}\n\n` +
-      `📖 *السيناريو:*\n${(episode.scenario || '').substring(0, 300)}${episode.scenario?.length > 300 ? '...' : ''}\n\n` +
-      (episode.youtube_url ? `🔗 [شاهد على يوتيوب](${episode.youtube_url})\n\n` : '') +
-      (episode.error_message ? `⚠️ *الخطأ:* ${episode.error_message}\n\n` : ''),
-      episodeActionsKeyboard(seriesId, episodeId, hasVideo)
-    );
+  // ──────────────────────────────────────────────────────────────────
+  // STEP 3b: SPLIT DECISION (for 10-min)
+  // ──────────────────────────────────────────────────────────────────
+  if (data.startsWith('split:')) {
+    const splitMode = data === 'split:yes';
+    await setUserState(userId, STATES.IDLE, { ...tempData, splitMode });
+    await searchAndShowStory(bot, chatId, msgId, userId, { ...tempData, splitMode });
     return;
   }
 
-  // ── View episode scenario ────────────────────────────────────
-  if (data.startsWith('view_ep_scenario:')) {
-    const episodeId = parseInt(data.split(':')[1]);
-    const episode   = await getEpisode(episodeId);
-    if (!episode) return;
+  // ──────────────────────────────────────────────────────────────────
+  // ANOTHER STORY (retry search)
+  // ──────────────────────────────────────────────────────────────────
+  if (data.startsWith('another:')) {
+    const category  = tempData.category;
+    const language  = tempData.language || 'ar';
+    const durKey    = tempData.durKey || '3';
+    const durCfg    = DURATION_CONFIG[durKey];
+    const nextIndex = (tempData.searchRetry || 0) + 1;
 
-    await bot.sendMessage(
-      chatId,
-      `📖 *سيناريو الحلقة ${episode.episode_number}: ${episode.title}*\n\n${episode.scenario || 'لا يوجد سيناريو'}`,
-      { parse_mode: 'Markdown' }
-    );
-    return;
-  }
-
-  // ── Create single episode video ──────────────────────────────
-  if (data.startsWith('create_ep:')) {
-    const [, seriesId, episodeNum] = data.split(':');
-    const series  = await getSeriesById(parseInt(seriesId));
-    if (!series) return;
-
-    const episodes = await getSeriesEpisodes(parseInt(seriesId));
-    const episode  = episodes.find(e => e.episode_number === parseInt(episodeNum));
-    if (!episode) return bot.sendMessage(chatId, '❌ الحلقة غير موجودة.');
-
-    await safeEdit(
-      bot, chatId, msgId,
-      `🎬 *جاري توليد فيديو الحلقة ${episode.episode_number}...*\n\n` +
-      `📺 المسلسل: ${series.title}\n` +
-      `🎭 الحلقة: ${episode.title}\n\n` +
-      `⏳ قد يستغرق 2-5 دقائق. ستصلك رسالة عند الانتهاء.`
-    );
-
-    // Run async in background
-    ;(async () => {
-      try {
-        await updateEpisode(episode.id, { status: 'generating' });
-        const result = await generateEpisodeVideo(episode, series);
-        if (result.success) {
-          await bot.sendMessage(
-            chatId,
-            `✅ *تم توليد الحلقة بنجاح!*\n\n` +
-            `📺 ${series.title}\n🎬 الحلقة ${episode.episode_number}: ${episode.title}\n\n` +
-            `اضغط "نشر" لرفعها على يوتيوب أو انتظر النشر التلقائي.`,
-            { parse_mode: 'Markdown', ...scenarioActionsKeyboard(series.id) }
-          );
-        }
-      } catch (err) {
-        logger.error('BOT', `Episode generation failed: ${err.message}`);
-        await bot.sendMessage(
-          chatId,
-          `❌ *فشل توليد الحلقة ${episode.episode_number}*\n\n${err.message}`,
-          { parse_mode: 'Markdown', ...mainKeyboard() }
-        );
-      }
-    })();
-    return;
-  }
-
-  // ── Publish now (next pending episode) ──────────────────────
-  if (data.startsWith('publish_now:')) {
-    const seriesId = parseInt(data.split(':')[1]);
-    const series   = await getSeriesById(seriesId);
-    if (!series) return bot.sendMessage(chatId, '❌ المسلسل غير موجود.');
-
-    await safeEdit(
-      bot, chatId, msgId,
-      `⏳ *جاري توليد الحلقة ورفعها...*\n\n` +
-      `📺 ${series.title}\n\n` +
-      `🤖 يولّد السيناريو → الصورة → الفيديو → الصوت → يرفع على يوتيوب\n` +
-      `_(قد يستغرق 3-7 دقائق — ستصلك رسالة عند الانتهاء)_`
-    );
-
-    triggerManualPublish(seriesId).catch(async (err) => {
-      logger.error('BOT', `Manual publish failed: ${err.message}`);
-      await bot.sendMessage(
-        chatId,
-        `❌ *فشل النشر:*\n${err.message}`,
-        { parse_mode: 'Markdown', ...mainKeyboard() }
-      );
-    });
-    return;
-  }
-
-  // ── View full scenario ───────────────────────────────────────
-  if (data.startsWith('view_scenario:')) {
-    const seriesId = parseInt(data.split(':')[1]);
-    const series   = await getSeriesById(seriesId);
-    if (!series || !series.full_scenario) {
-      return bot.sendMessage(chatId, '❌ السيناريو غير موجود.');
+    if (!category) {
+      await safeEdit(bot, chatId, msgId, '📚 اختر فئة أولاً:', categoryKeyboard());
+      return;
     }
 
-    let parsed;
-    try { parsed = JSON.parse(series.full_scenario); } catch { parsed = {}; }
-
-    const charList = (parsed.characters || [])
-      .map(c => `👤 *${c.name}*\n  المظهر: ${c.appearance || ''}\n  الشخصية: ${c.personality || ''}`)
-      .join('\n\n');
-
-    await bot.sendMessage(
-      chatId,
-      `📖 *سيناريو "${series.title}"*\n${'─'.repeat(28)}\n\n` +
-      `👥 *الشخصيات:*\n${charList}\n\n` +
-      `📝 *ملخص القصة:*\n${parsed.story_summary || ''}`,
-      { parse_mode: 'Markdown', ...seriesActionsKeyboard(seriesId) }
-    );
-    return;
-  }
-
-  // ── Regenerate scenario ──────────────────────────────────────
-  if (data.startsWith('regen_scenario:')) {
-    const seriesId = parseInt(data.split(':')[1]);
-    const series   = await getSeriesById(seriesId);
-    if (!series) return;
-
-    await safeEdit(
-      bot, chatId, msgId,
-      `⚠️ *إعادة توليد السيناريو*\n\nسيُحذف السيناريو الحالي وتُنشأ قصة جديدة.\n\nهل أنت متأكد؟`,
-      confirmKeyboard(`regen_${seriesId}`)
-    );
-    return;
-  }
-
-  if (data.startsWith('confirm:regen_')) {
-    const seriesId = parseInt(data.replace('confirm:regen_', ''));
-    const series   = await getSeriesById(seriesId);
-    if (!series) return;
-
-    const { generateSeriesScenario } = await import('../../services/groqService.js');
-    const { createEpisode } = await import('../../db/database.js');
-
-    await safeEdit(bot, chatId, msgId, `⏳ جاري إعادة التوليد...`);
+    await safeEdit(bot, chatId, msgId, '🔍 *جاري البحث عن قصة مختلفة...*\n\n⏳ لحظة...');
 
     try {
-      const scenario = await generateSeriesScenario(
-        series.title, series.genre, series.description,
-        series.total_episodes, series.language || 'ar'
-      );
+      const storyData = await findHistoricalStory(category, language, nextIndex);
+      const story = await createStory(userId, {
+        category, language,
+        title: storyData.title, period: storyData.period,
+        location: storyData.location, summary: storyData.summary,
+        story_data: storyData, narrator_tone: storyData.tone || 'dramatic',
+        duration_minutes: parseInt(durKey), split_parts: durCfg?.split || 1,
+        scenes_per_part: durCfg?.scenes || 7, sec_per_scene: durCfg?.secPerScene || 26
+      });
 
-      await updateSeries(seriesId, { full_scenario: JSON.stringify(scenario) });
+      await setUserState(userId, STATES.IDLE, {
+        ...tempData, storyId: story.id, pendingStory: storyData, searchRetry: nextIndex
+      });
 
-      const charList = (scenario.characters || [])
-        .map(c => `👤 *${c.name}* — ${c.personality || ''}`)
-        .join('\n');
-
-      await bot.sendMessage(
-        chatId,
-        `✅ *تم إعادة توليد السيناريو!*\n\n` +
-        `👥 *الشخصيات الجديدة:*\n${charList}\n\n` +
-        `📖 *القصة:*\n${scenario.story_summary || ''}`,
-        { parse_mode: 'Markdown', ...scenarioActionsKeyboard(seriesId) }
-      );
+      const txt = `📖 *${storyData.title}*\n\n📅 ${storyData.period} | 📍 ${storyData.location}\n\n*الملخص:*\n${storyData.summary}\n\n_هل تريد إنشاء الفيديو؟_`;
+      await safeEdit(bot, chatId, msgId, txt, storyPreviewKeyboard(story.id));
     } catch (err) {
-      await bot.sendMessage(chatId, `❌ فشل: ${err.message}`, mainKeyboard());
+      await safeEdit(bot, chatId, msgId, `❌ ${err.message}`, categoryKeyboard());
     }
     return;
   }
 
-  // ── Delete series ────────────────────────────────────────────
-  if (data.startsWith('delete_series:')) {
-    const seriesId = data.split(':')[1];
-    await safeEdit(
-      bot, chatId, msgId,
-      `🗑️ *حذف المسلسل*\n\nهل أنت متأكد؟ لا يمكن التراجع عن هذا الإجراء.`,
-      confirmKeyboard(`del_${seriesId}`)
+  // ──────────────────────────────────────────────────────────────────
+  // VIEW SCRIPT
+  // ──────────────────────────────────────────────────────────────────
+  if (data.startsWith('script:')) {
+    const storyId = parseInt(data.split(':')[1]);
+    const story = await getStoryById(storyId);
+    if (!story) return;
+
+    const script = story.script_data;
+    if (!script?.scenes?.length) {
+      await safeEdit(bot, chatId, msgId,
+        '⏳ السيناريو لم يُنشأ بعد. اضغط "إنشاء الفيديو" أولاً.',
+        storyPreviewKeyboard(storyId)
+      );
+      return;
+    }
+
+    const scenesText = script.scenes.map((s, i) =>
+      `*المشهد ${i + 1}: ${s.scene_title || ''}*\n${(s.narration || '').substring(0, 200)}`
+    ).join('\n\n──\n\n');
+
+    const header = story.duration_minutes
+      ? `📝 *سيناريو: ${story.title}*\n⏱️ المدة: ${story.duration_minutes} دقيقة | ${script.scenes.length} مشاهد\n\n`
+      : `📝 *سيناريو: ${story.title}*\n\n`;
+
+    await safeEdit(bot, chatId, msgId,
+      (header + scenesText).substring(0, 4000),
+      storyPreviewKeyboard(storyId)
     );
     return;
   }
 
-  if (data.startsWith('confirm:del_')) {
-    const seriesId = parseInt(data.replace('confirm:del_', ''));
-    await updateSeries(seriesId, { status: 'deleted' });
-    await safeEdit(bot, chatId, msgId, '✅ تم حذف المسلسل بنجاح.');
-    await bot.sendMessage(chatId, '🏠 القائمة الرئيسية:', mainKeyboard());
+  // ──────────────────────────────────────────────────────────────────
+  // GENERATE VIDEO
+  // ──────────────────────────────────────────────────────────────────
+  if (data.startsWith('generate:')) {
+    const storyId = parseInt(data.split(':')[1]);
+    const story = await getStoryById(storyId);
+    if (!story) { await bot.answerCallbackQuery(query.id, { text: '❌ القصة غير موجودة' }); return; }
+    if (story.status === 'generating') { await bot.answerCallbackQuery(query.id, { text: '⏳ قيد الإنشاء بالفعل' }); return; }
+
+    const durKey    = String(story.duration_minutes || 3);
+    const durCfg    = DURATION_CONFIG[durKey] || DURATION_CONFIG['3'];
+    const isSplit   = story.split_parts > 1;
+
+    await updateStory(storyId, { status: 'generating' });
+
+    const durLabel = durCfg?.label || `${story.duration_minutes} دقائق`;
+    const splitLabel = isSplit ? ` | ${story.split_parts} أجزاء` : '';
+
+    await safeEdit(bot, chatId, msgId,
+      `🎬 *بدأ إنشاء الفيديو!*\n_${story.title}_\n\n` +
+      `⏱️ المدة: ${durLabel}${splitLabel}\n` +
+      `🎞️ ${isSplit ? story.split_parts + ' أجزاء × ' + durCfg.scenes + ' مشاهد' : durCfg.scenes + ' مشهد'}\n\n` +
+      `⏳ الإنشاء يستغرق بضع دقائق...`
+    );
+
+    const progressCallback = makeProgressCallback(bot, chatId, msgId, story.title);
+    const hasYouTube = !!(await getYouTubeChannel(userId));
+
+    try {
+      if (isSplit) {
+        // ── MULTI-PART VIDEO ───────────────────────────────────────
+        await handleSplitVideoGeneration(
+          bot, chatId, msgId, userId, story, durCfg, progressCallback, hasYouTube
+        );
+      } else {
+        // ── SINGLE VIDEO ───────────────────────────────────────────
+        await handleSingleVideoGeneration(
+          bot, chatId, msgId, userId, story, durCfg, progressCallback, hasYouTube
+        );
+      }
+    } catch (err) {
+      logger.error('GENERATE', err.message);
+      await updateStory(storyId, { status: 'failed', error_message: err.message });
+      await safeEdit(bot, chatId, msgId,
+        `❌ *فشل الإنشاء*\n\n${err.message}\n\nحاول مرة أخرى:`,
+        storyPreviewKeyboard(storyId)
+      );
+      await logAutoPublish(userId, storyId, 'generate_video', 'failed', { error: err.message });
+    }
     return;
   }
 
-  // ── YouTube setup ────────────────────────────────────────────
-  if (data === 'yt_setup:manual') {
+  // ──────────────────────────────────────────────────────────────────
+  // PUBLISH TO YOUTUBE
+  // ──────────────────────────────────────────────────────────────────
+  if (data.startsWith('publish:')) {
+    const storyId = parseInt(data.split(':')[1]);
+    const story = await getStoryById(storyId);
+    if (!story) return;
+
+    const channel = await getYouTubeChannel(userId);
+    if (!channel) {
+      await safeEdit(bot, chatId, msgId,
+        '❌ لم تربط قناتك بعد. اذهب إلى "📺 إعداد يوتيوب".',
+        backToMainKeyboard()
+      );
+      return;
+    }
+
+    if (!story.video_url) {
+      await safeEdit(bot, chatId, msgId,
+        '❌ الفيديو غير موجود في التخزين. أعد إنشاؤه.',
+        storyPreviewKeyboard(storyId)
+      );
+      return;
+    }
+
+    await safeEdit(bot, chatId, msgId, '📺 *جاري النشر على يوتيوب...*\n\n⏳ لحظة...');
+
+    try {
+      const ytMeta = await generateYouTubeMetadata(story.story_data || {}, story.script_data || {});
+      const result = await uploadWithEnvCredentials(
+        story.video_url, ytMeta.title || story.title,
+        ytMeta.description || story.summary, ytMeta.tags || ['تاريخ']
+      );
+      await updateStory(storyId, {
+        status: 'published',
+        youtube_video_id: result.videoId,
+        youtube_url: result.shortsUrl || result.url
+      });
+      await safeEdit(bot, chatId, msgId,
+        `✅ *تم النشر!*\n\n📺 ${ytMeta.title || story.title}\n\n🔗 ${result.shortsUrl || result.url}`,
+        backToMainKeyboard()
+      );
+      await logAutoPublish(userId, storyId, 'youtube_publish', 'success', { videoId: result.videoId });
+    } catch (err) {
+      await safeEdit(bot, chatId, msgId, `❌ فشل النشر: ${err.message}`, storyDetailKeyboard(story));
+    }
+    return;
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // STORY LIBRARY DETAIL
+  // ──────────────────────────────────────────────────────────────────
+  if (data.startsWith('story:')) {
+    const storyId = parseInt(data.split(':')[1]);
+    const story = await getStoryById(storyId);
+    if (!story) { await bot.answerCallbackQuery(query.id, { text: 'القصة غير موجودة' }); return; }
+
+    const status = STATUS_LABELS[story.status] || story.status;
+    const durInfo = story.duration_minutes ? `⏱️ ${story.duration_minutes} دقيقة | ${story.split_parts || 1} جزء\n` : '';
+    const ytLink = story.youtube_url ? `\n📺 [مشاهدة على يوتيوب](${story.youtube_url})` : '';
+    const text = `📖 *${story.title}*\n\n📅 ${story.period || '—'} | 📍 ${story.location || '—'}\n📊 ${status}\n${durInfo}${ytLink}\n\n*الملخص:*\n${story.summary || '—'}`;
+
+    await safeEdit(bot, chatId, msgId, text, storyDetailKeyboard(story));
+    return;
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // YOUTUBE SETUP
+  // ──────────────────────────────────────────────────────────────────
+  if (data === 'yt:setup') {
     await setUserState(userId, STATES.YT_CLIENT_ID, {});
-    await safeEdit(
-      bot, chatId, msgId,
-      `⚙️ *ربط قناة يوتيوب (1/3)*\n\n` +
-      `🆔 أدخل *Client ID:*\n\n` +
-      `_من: Google Cloud Console → APIs & Services → Credentials_`
+    await safeEdit(bot, chatId, msgId,
+      `🔧 *ربط قناة يوتيوب*\n\n*الخطوة 1/3*\nأرسل *Client ID* من Google Cloud Console:\n\n_اذهب إلى: console.cloud.google.com → APIs → OAuth 2.0 Client IDs_`
     );
     return;
   }
 
-  // ── Back navigation ──────────────────────────────────────────
-  if (data === 'back:main' || data === 'cancel:action') {
+  if (data === 'yt:help') {
+    await safeEdit(bot, chatId, msgId,
+      `❓ *كيف تحصل على بيانات يوتيوب؟*\n\n1️⃣ console.cloud.google.com\n2️⃣ أنشئ مشروعاً جديداً\n3️⃣ فعّل YouTube Data API v3\n4️⃣ أنشئ OAuth 2.0 Client ID\n5️⃣ استخدم OAuth Playground للحصول على Refresh Token\n\n_رابط: developers.google.com/oauthplayground_`,
+      youtubeSetupKeyboard()
+    );
+    return;
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // DELETE
+  // ──────────────────────────────────────────────────────────────────
+  if (data.startsWith('delete:')) {
+    const storyId = parseInt(data.split(':')[1]);
+    await safeEdit(bot, chatId, msgId,
+      '🗑️ هل أنت متأكد من حذف هذه القصة؟',
+      confirmKeyboard('delete', storyId)
+    );
+    return;
+  }
+
+  if (data.startsWith('confirm:delete:')) {
+    const storyId = parseInt(data.split(':')[2]);
+    await updateStory(storyId, { status: 'deleted' });
+    await safeEdit(bot, chatId, msgId, '✅ تم الحذف.');
+    return bot.sendMessage(chatId, 'العودة للقائمة الرئيسية:', mainKeyboard());
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // NAVIGATION
+  // ──────────────────────────────────────────────────────────────────
+  if (data === 'new:story') {
     await setUserState(userId, STATES.IDLE, {});
-    await safeEdit(bot, chatId, msgId, '🏠 القائمة الرئيسية:');
-    await bot.sendMessage(chatId, '👇 اختر من القائمة:', mainKeyboard());
+    await safeEdit(bot, chatId, msgId, '📚 *اختر فئة القصة:*', categoryKeyboard());
     return;
   }
 
-  if (data === 'back:genre') {
-    await safeEdit(
-      bot, chatId, msgId,
-      '🎭 *الخطوة 1 من 4 — اختر نوع المسلسل:*',
-      genreKeyboard()
-    );
-    return;
-  }
-
-  if (data === 'back:episodes') {
-    await safeEdit(
-      bot, chatId, msgId,
-      `✅ *النوع:* ${GENRE_LABELS[tempData.genre] || tempData.genre}\n\n` +
-      stepHeader(2, 4, 'الخطوة 2 من 4 — كم حلقة تريد؟'),
-      episodesCountKeyboard()
-    );
+  if (data === 'back:main') {
+    await setUserState(userId, STATES.IDLE, {});
+    await safeEdit(bot, chatId, msgId, WELCOME_MSG, mainKeyboard());
     return;
   }
 
   if (data === 'back:lang') {
-    await safeEdit(
-      bot, chatId, msgId,
-      `✅ *النوع:* ${GENRE_LABELS[tempData.genre] || tempData.genre}\n` +
-      `✅ *الحلقات:* ${tempData.total_episodes} حلقة\n\n` +
-      stepHeader(3, 4, 'الخطوة 3 من 4 — اللغة'),
+    await safeEdit(bot, chatId, msgId,
+      `${CATEGORY_LABELS[tempData.category] || ''}\n\n*اختر لغة الراوي:*`,
       languageKeyboard()
     );
     return;
   }
 
-  if (data === 'back:my_series') {
-    const series = await getUserSeries(userId);
-    if (!series.length) {
-      await safeEdit(bot, chatId, msgId, '📭 لا توجد مسلسلات بعد.');
-      return;
-    }
-    const { seriesListKeyboard } = await import('../messages.js');
-    await safeEdit(
-      bot, chatId, msgId,
-      `📺 *مسلسلاتك (${series.length}):*\n\nاختر مسلسلاً:`,
-      seriesListKeyboard(series)
+  if (data === 'back:duration') {
+    await safeEdit(bot, chatId, msgId,
+      `⏱️ *اختر مدة الفيديو:*`,
+      durationKeyboard()
+    );
+    return;
+  }
+
+  if (data === 'back:library') {
+    const stories = await getUserStories(userId);
+    if (!stories.length) { await safeEdit(bot, chatId, msgId, '📭 مكتبتك فارغة.'); return; }
+    await safeEdit(bot, chatId, msgId,
+      `📚 *مكتبتك (${stories.length} قصة):*\nاختر قصة:`,
+      storiesListKeyboard(stories)
     );
     return;
   }
@@ -434,3 +407,150 @@ export async function handleCallbackQuery(bot, query) {
   logger.warn('BOT', `Unknown callback: ${data}`);
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════
+
+async function searchAndShowStory(bot, chatId, msgId, userId, tempDataWithDur) {
+  const { category, language, durKey, durCfg, searchRetry = 0 } = tempDataWithDur;
+
+  await safeEdit(bot, chatId, msgId,
+    `🔍 *جاري البحث عن قصة ${CATEGORY_LABELS[category]}...*\n` +
+    `⏱️ المدة: ${durCfg?.label}\n\n⏳ لحظة من فضلك...`
+  );
+
+  try {
+    const storyData = await findHistoricalStory(category, language, searchRetry);
+
+    const story = await createStory(userId, {
+      category, language,
+      title: storyData.title, period: storyData.period,
+      location: storyData.location, summary: storyData.summary,
+      story_data: storyData, narrator_tone: storyData.tone || 'dramatic',
+      duration_minutes: parseInt(durKey),
+      split_parts: durCfg?.split || 1,
+      scenes_per_part: durCfg?.scenes || 7,
+      sec_per_scene: durCfg?.secPerScene || 26
+    });
+
+    await setUserState(userId, 'idle', {
+      ...tempDataWithDur, storyId: story.id, pendingStory: storyData, searchRetry
+    });
+
+    const chars = (storyData.key_characters || []).map(c =>
+      typeof c === 'object' ? `• ${c.name} — ${c.role}` : `• ${c}`
+    ).join('\n');
+
+    const durLine = durCfg ? `\n⏱️ *المدة:* ${durCfg.label} | ${durCfg.scenes} مشهد${durCfg.split > 1 ? ` (${durCfg.split} أجزاء)` : ''}` : '';
+
+    const preview = [
+      `📖 *${storyData.title}*\n`,
+      `📅 ${storyData.period} | 📍 ${storyData.location}${durLine}`,
+      `\n*الملخص:*\n${storyData.summary}`,
+      chars ? `\n*الشخصيات:*\n${chars}` : '',
+      `\n*لماذا ستجلب مشاهدات؟*\n${storyData.why_viral || ''}`,
+      `\n─────────────\n_اضغط "✅ إنشاء الفيديو" لبدء الإنشاء التلقائي_`
+    ].filter(Boolean).join('\n');
+
+    await safeEdit(bot, chatId, msgId, preview, storyPreviewKeyboard(story.id));
+  } catch (err) {
+    logger.error('SEARCH', err.message);
+    await safeEdit(bot, chatId, msgId,
+      `❌ فشل البحث: ${err.message}\n\nاختر فئة أخرى:`,
+      categoryKeyboard()
+    );
+  }
+}
+
+async function handleSingleVideoGeneration(bot, chatId, msgId, userId, story, durCfg, progressCallback, hasYouTube) {
+  const storyId = story.id;
+  const sceneCount = durCfg?.scenes || story.scenes_per_part || 7;
+  const secPerScene = durCfg?.secPerScene || story.sec_per_scene || 26;
+
+  // Generate or reuse script
+  let script = story.script_data;
+  if (!script?.scenes?.length) {
+    await progressCallback(`📝 كتابة السيناريو (${sceneCount} مشاهد)...`);
+    script = await generateStoryScript(story.story_data, story.language, sceneCount, secPerScene);
+    await updateStory(storyId, { script_data: script, total_scenes: script.scenes?.length || 0 });
+  }
+
+  const result = await generateStoryVideo(
+    { ...story, id: storyId }, script,
+    { language: story.language, voiceId: story.voice_id, progressCallback }
+  );
+
+  await progressCallback('☁️ رفع الفيديو...');
+  let videoUrl = null;
+  try {
+    videoUrl = await uploadVideoToStorage(result.videoPath, `story_${storyId}_${Date.now()}.mp4`);
+  } catch (e) {
+    logger.warn('STORAGE', `Upload failed: ${e.message}`);
+  }
+
+  await updateStory(storyId, { status: 'video_ready', video_url: videoUrl });
+
+  const durationSec = result.durationSeconds || (sceneCount * secPerScene);
+  const fileMB = result.fileSizeMB || 0;
+
+  await bot.editMessageText(
+    `✅ *الفيديو جاهز!*\n_${story.title}_\n\n` +
+    `⏱️ ${Math.round(durationSec / 60)} دقيقة ${durationSec % 60} ثانية\n` +
+    `📦 ${fileMB.toFixed(1)} MB\n\nجاري الإرسال...`,
+    { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown' }
+  );
+
+  const caption = `🎬 *${story.title}*\n\n${(story.summary || '').substring(0, 200)}\n\n📅 ${story.period || ''} | 📍 ${story.location || ''}`;
+
+  await bot.sendVideo(chatId, result.videoPath, {
+    caption, parse_mode: 'Markdown', supports_streaming: true,
+    ...afterVideoKeyboard(storyId, hasYouTube)
+  });
+
+  await fs.remove(result.videoPath).catch(() => {});
+  await logAutoPublish(userId, storyId, 'generate_video', 'success');
+}
+
+async function handleSplitVideoGeneration(bot, chatId, msgId, userId, story, durCfg, progressCallback, hasYouTube) {
+  const storyId   = story.id;
+  const totalParts = story.split_parts || durCfg?.split || 3;
+  const sceneCount = durCfg?.scenes || story.scenes_per_part || 7;
+  const secPerScene = durCfg?.secPerScene || story.sec_per_scene || 29;
+
+  await progressCallback(`🎞️ إنشاء ${totalParts} أجزاء — ${sceneCount} مشاهد × ${totalParts}...`);
+
+  const results = await generateSplitVideos(
+    { ...story, id: storyId },
+    { totalParts, sceneCount, secPerScene, language: story.language, voiceId: story.voice_id },
+    async (partNum, msg) => {
+      await progressCallback(`📦 الجزء ${partNum}/${totalParts}: ${msg}`);
+    }
+  );
+
+  await updateStory(storyId, { status: 'video_ready', total_scenes: totalParts * sceneCount });
+
+  await bot.editMessageText(
+    `✅ *${totalParts} أجزاء جاهزة!*\n_${story.title}_\n\nجاري الإرسال...`,
+    { chat_id: chatId, message_id: msgId, parse_mode: 'Markdown' }
+  );
+
+  for (let i = 0; i < results.length; i++) {
+    const part = results[i];
+    const partLabel = `الجزء ${i + 1} من ${totalParts}`;
+    const caption = `🎬 *${story.title}*\n📹 ${partLabel}\n\n${(story.summary || '').substring(0, 150)}`;
+
+    try {
+      await bot.sendVideo(chatId, part.videoPath, {
+        caption, parse_mode: 'Markdown', supports_streaming: true,
+        ...(i === results.length - 1 ? afterVideoKeyboard(storyId, hasYouTube) : {})
+      });
+    } catch (err) {
+      logger.warn('SEND', `Part ${i + 1} send failed: ${err.message}`);
+    }
+
+    await fs.remove(part.videoPath).catch(() => {});
+    await new Promise(r => setTimeout(r, 1500)); // gap between sends
+  }
+
+  await logAutoPublish(userId, storyId, 'generate_split_video', 'success');
+}
