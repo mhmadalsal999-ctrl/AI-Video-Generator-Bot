@@ -1,33 +1,21 @@
-{
-  "name": "anime-series-bot",
-  "version": "2.0.0",
-  "description": "Telegram bot for AI anime series generation and auto-publishing to YouTube",
-  "main": "server.js",
-  "type": "module",
-  "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
-  },
-  "keywords": ["telegram", "bot", "anime", "ai", "youtube", "automation"],
-  "author": "",
-  "license": "ISC",
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "node-telegram-bot-api": "^0.64.0",
-    "@supabase/supabase-js": "^2.39.0",
-    "axios": "^1.6.2",
-    "dotenv": "^16.3.1",
-    "cors": "^2.8.5",
-    "fluent-ffmpeg": "^2.1.2",
-    "ffmpeg-static": "^5.2.0",
-    "fs-extra": "^11.2.0",
-    "googleapis": "^128.0.0",
-    "node-cron": "^3.0.3",
-    "groq-sdk": "^0.7.0",
-    "form-data": "^4.0.0",
-    "uuid": "^9.0.0"
-  }
-}
+Error
+java.io.FileNotFoundException: /storage/emulated/0/Android/data/bin.mt.plus.canary/temp/28fe7e71774571212/4b4f792f/package.json: open failed: ENOENT (No such file or directory)
+	at libcore.io.IoBridge.open(IoBridge.java:574)
+	at java.io.FileInputStream.<init>(FileInputStream.java:179)
+	at l.۠ۙۘ.ۙۨ(Unknown Source:4)
+	at l.ۢۡۘ.ۖۨ(Unknown Source:0)
+	at l.ۨۙ۠.ۥ(Unknown Source:6)
+	at l.ۨۙ۠.ۥ(Native Method)
+	at l.ۧۖ۠.call(Unknown Source:27)
+	at java.util.concurrent.FutureTask.run(FutureTask.java:317)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1154)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:652)
+	at java.lang.Thread.run(Thread.java:1564)
+Caused by: android.system.ErrnoException: open failed: ENOENT (No such file or directory)
+	at libcore.io.Linux.open(Native Method)
+	at libcore.io.ForwardingOs.open(ForwardingOs.java:574)
+	at libcore.io.BlockGuardOs.open(BlockGuardOs.java:274)
+	at libcore.io.ForwardingOs.open(ForwardingOs.java:574)
+	at android.app.ActivityThread$AndroidOs.open(ActivityThread.java:8018)
+	at libcore.io.IoBridge.open(IoBridge.java:560)
+	... 10 more
