@@ -1,4 +1,4 @@
-/**
+**
  * huggingfaceService.js
  * Image Generation — Multi-provider with clean fallback chain
  *
@@ -45,7 +45,7 @@ async function generateWithGemini(cleanPrompt) {
   logger.api(`Gemini: "${cleanPrompt.substring(0, 60)}..."`);
 
   const response = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${apiKey}`,
     {
       contents: [{ parts: [{ text: fullPrompt }] }],
       generationConfig: { responseModalities: ['IMAGE', 'TEXT'] }
