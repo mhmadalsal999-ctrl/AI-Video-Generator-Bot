@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "build": "pip3 install edge-tts --break-system-packages -q || true"
   },
   "engines": {
     "node": ">=20.0.0"
