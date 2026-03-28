@@ -54,7 +54,7 @@ async function generateWithHuggingFace(cleanPrompt, modelIndex = 0) {
   logger.api(`HuggingFace [${model.split('/')[1]}]: "${cleanPrompt.substring(0, 50)}..."`);
 
   const response = await axios.post(
-    `https://api-inference.huggingface.co/models/${model}`,
+    `https://router.huggingface.co/hf-inference/models/${model}`,
     {
       inputs: fullPrompt,
       parameters: {
