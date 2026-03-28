@@ -205,9 +205,14 @@ export async function saveYouTubeChannel(userId, channelData) {
 // LOGGING
 // ═══════════════════════════════════════════════════════════════════
 export async function logAutoPublish(userId, storyId, action, status, details = {}) {
-  await supabase.from('auto_publish_log').insert({
-    user_id: userId.toString(), story_id: storyId, action, status, details
-  }).catch(() => {});
+  try {
+    const { error } = await supabase.from('auto_publish_log').insert({
+      user_id: userId.toString(), story_id: storyId, action, status, details
+    });
+    if (error) console.warn('[DB] logAutoPublish warning:', error.message);
+  } catch (err) {
+    console.warn('[DB] logAutoPublish failed silently:', err.message);
+  }
 }
 
 // ── Backwards compatibility aliases ──────────────────────────────────
