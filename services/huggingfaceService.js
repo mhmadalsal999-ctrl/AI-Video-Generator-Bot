@@ -1,12 +1,12 @@
-**
+/**
  * huggingfaceService.js
- * Image Generation — Multi-provider with clean fallback chain
+ * Image Generation - Multi-provider with clean fallback chain
  *
  * Priority:
- * 1. Google Gemini API  — مجاني، يحتاج GEMINI_API_KEY (primary ✅)
- * 2. Pollinations.ai    — مجاني، بدون API key (fallback 1)
- * 3. Prodia             — مجاني، يحتاج PRODIA_API_KEY (fallback 2)
- * 4. Stable Horde       — مجاني تماماً، بدون API key (fallback 3)
+ * 1. Google Gemini API  - مجاني، يحتاج GEMINI_API_KEY (primary ✅)
+ * 2. Pollinations.ai    - مجاني، بدون API key (fallback 1)
+ * 3. Prodia             - مجاني، يحتاج PRODIA_API_KEY (fallback 2)
+ * 4. Stable Horde       - مجاني تماماً، بدون API key (fallback 3)
  */
 
 import axios from 'axios';
@@ -33,7 +33,7 @@ function sanitizePrompt(prompt) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// 1. GOOGLE GEMINI — Primary ✅ (Free ~500 req/day)
+// 1. GOOGLE GEMINI - Primary ✅ (Free ~500 req/day)
 //    احصل على مفتاحك المجاني: https://aistudio.google.com/apikey
 //    أضف في .env: GEMINI_API_KEY=your_key_here
 // ═══════════════════════════════════════════════════════════════════
@@ -71,7 +71,7 @@ async function generateWithGemini(cleanPrompt) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// 2. POLLINATIONS.AI — Fallback 1 (Free, no key needed)
+// 2. POLLINATIONS.AI - Fallback 1 (Free, no key needed)
 // ═══════════════════════════════════════════════════════════════════
 const POLLINATIONS_MODELS = ['flux', 'turbo', null];
 
@@ -107,7 +107,7 @@ async function generateWithPollinations(cleanPrompt, width = 1280, height = 720,
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// 3. PRODIA — Fallback 2 (Free key at prodia.com)
+// 3. PRODIA - Fallback 2 (Free key at prodia.com)
 // ═══════════════════════════════════════════════════════════════════
 async function generateWithProdia(cleanPrompt) {
   const apiKey = process.env.PRODIA_API_KEY;
@@ -151,7 +151,7 @@ async function generateWithProdia(cleanPrompt) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// 4. STABLE HORDE — Fallback 3 (Always free, may be slow)
+// 4. STABLE HORDE - Fallback 3 (Always free, may be slow)
 // ═══════════════════════════════════════════════════════════════════
 const HORDE_ANON_KEY = '0000000000';
 const HORDE_MODELS = ['Realistic Vision v6.0 B1', 'Deliberate 3.0', 'dreamshaper_8'];
@@ -180,7 +180,7 @@ async function generateWithStableHorde(cleanPrompt, width = 1280, height = 704) 
 
   const jobId = jobRes.data.id;
   if (!jobId) throw new Error('No job ID from Stable Horde');
-  logger.api(`Stable Horde job: ${jobId} — polling...`);
+  logger.api(`Stable Horde job: ${jobId} - polling...`);
 
   for (let attempt = 0; attempt < 60; attempt++) {
     await new Promise(r => setTimeout(r, 5000));
@@ -214,25 +214,25 @@ async function generateWithStableHorde(cleanPrompt, width = 1280, height = 704) 
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// MAIN EXPORT — Full fallback chain
+// MAIN EXPORT - Full fallback chain
 // Priority: Gemini ✅ → Pollinations → Prodia → Stable Horde
 // ═══════════════════════════════════════════════════════════════════
 export async function generateImageFromPrompt(rawPrompt, width = 1280, height = 720) {
   const cleanPrompt = sanitizePrompt(rawPrompt) || 'historical scene, dramatic lighting, cinematic';
   logger.api(`Generating image for: "${cleanPrompt.substring(0, 60)}..."`);
 
-  // 1. ✅ Gemini — الأفضل والأسرع
+  // 1. ✅ Gemini - الأفضل والأسرع
   try {
     return await generateWithGemini(cleanPrompt);
   } catch (err) {
     if (err.message.includes('not set')) {
-      logger.warn('IMG', '⚠️  GEMINI_API_KEY غير موجود في .env — جارٍ تجربة البدائل');
+      logger.warn('IMG', '⚠️  GEMINI_API_KEY غير موجود في .env - جارٍ تجربة البدائل');
     } else {
       logger.warn('IMG', `Gemini failed: ${err.message}`);
     }
   }
 
-  // 2. Pollinations — جرب كل النماذج
+  // 2. Pollinations - جرب كل النماذج
   for (let i = 0; i < POLLINATIONS_MODELS.length; i++) {
     try {
       return await generateWithPollinations(cleanPrompt, width, height, i);
@@ -242,7 +242,7 @@ export async function generateImageFromPrompt(rawPrompt, width = 1280, height = 
     }
   }
 
-  // 3. Prodia — إذا في API key
+  // 3. Prodia - إذا في API key
   try {
     return await generateWithProdia(cleanPrompt);
   } catch (err) {
@@ -251,7 +251,7 @@ export async function generateImageFromPrompt(rawPrompt, width = 1280, height = 
     }
   }
 
-  // 4. Stable Horde — آخر خيار (مجاني دائماً لكن بطيء)
+  // 4. Stable Horde - آخر خيار (مجاني دائماً لكن بطيء)
   try {
     logger.api('Trying Stable Horde (free, may take 1-3 min)...');
     return await generateWithStableHorde(cleanPrompt, width, height);
