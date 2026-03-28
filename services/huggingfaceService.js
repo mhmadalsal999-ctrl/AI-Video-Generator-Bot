@@ -1,12 +1,14 @@
 /**
  * huggingfaceService.js
- * Image Generation - Multi-provider with clean fallback chain
+ * Image Generation - Multi-provider with smart fallback chain
  *
  * Priority:
- * 1. Google Gemini API  - مجاني، يحتاج GEMINI_API_KEY (primary ✅)
- * 2. Pollinations.ai    - مجاني، بدون API key (fallback 1)
- * 3. Prodia             - مجاني، يحتاج PRODIA_API_KEY (fallback 2)
- * 4. Stable Horde       - مجاني تماماً، بدون API key (fallback 3)
+ * 1. Hugging Face FLUX.1-schnell - مجاني، سريع، بدون قيود جغرافية ✅
+ * 2. Hugging Face FLUX.1-dev    - نفس الشي، جودة اعلى
+ * 3. Stable Horde               - مجاني دائما (بطيء)
+ *
+ * احصل على مفتاح مجاني: https://huggingface.co/settings/tokens
+ * اضف في Render: HF_API_TOKEN=hf_xxxxxxxxxx
  */
 
 import axios from 'axios';
@@ -32,127 +34,67 @@ function sanitizePrompt(prompt) {
     .substring(0, 400);
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// 1. GOOGLE GEMINI - Primary ✅ (Free ~500 req/day)
-//    احصل على مفتاحك المجاني: https://aistudio.google.com/apikey
-//    أضف في .env: GEMINI_API_KEY=your_key_here
-// ═══════════════════════════════════════════════════════════════════
-async function generateWithGemini(cleanPrompt) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY not set');
+// ===================================================================
+// 1. HUGGING FACE FLUX.1-schnell - Primary (Free, no geo-restriction)
+//    احصل على توكن مجاني: https://huggingface.co/settings/tokens
+//    اضف في Render: HF_API_TOKEN=hf_xxxxxxxxxx
+// ===================================================================
+const HF_MODELS = [
+  'black-forest-labs/FLUX.1-schnell',
+  'black-forest-labs/FLUX.1-dev'
+];
 
+async function generateWithHuggingFace(cleanPrompt, modelIndex = 0) {
+  const token = process.env.HF_API_TOKEN;
+  if (!token) throw new Error('HF_API_TOKEN not set');
+
+  const model = HF_MODELS[modelIndex];
   const fullPrompt = `${QUALITY_PREFIX}, ${cleanPrompt}, ${QUALITY_SUFFIX}`;
-  logger.api(`Gemini: "${cleanPrompt.substring(0, 60)}..."`);
+
+  logger.api(`HuggingFace [${model.split('/')[1]}]: "${cleanPrompt.substring(0, 50)}..."`);
 
   const response = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${apiKey}`,
+    `https://api-inference.huggingface.co/models/${model}`,
     {
-      contents: [{ parts: [{ text: fullPrompt }] }],
-      generationConfig: { responseModalities: ['IMAGE', 'TEXT'] }
+      inputs: fullPrompt,
+      parameters: {
+        width: 1280,
+        height: 720,
+        num_inference_steps: 4,
+        guidance_scale: 0.0
+      }
     },
     {
-      headers: { 'Content-Type': 'application/json' },
-      timeout: 60000
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'image/jpeg'
+      },
+      responseType: 'arraybuffer',
+      timeout: 120000
     }
   );
 
-  const parts = response.data?.candidates?.[0]?.content?.parts || [];
-  const imagePart = parts.find(p => p.inlineData?.mimeType?.startsWith('image/'));
-  if (!imagePart) throw new Error('Gemini: no image in response');
-
-  const ext = imagePart.inlineData.mimeType.includes('png') ? 'png' : 'jpg';
-  const buffer = Buffer.from(imagePart.inlineData.data, 'base64');
-  if (buffer.byteLength < 5000) throw new Error(`Gemini: image too small (${buffer.byteLength} bytes)`);
-
-  const filePath = path.join(TEMP_DIR, `img_gemini_${Date.now()}.${ext}`);
-  await fs.writeFile(filePath, buffer);
-  logger.success('IMG', `✅ Gemini → ${path.basename(filePath)}`);
-  return filePath;
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// 2. POLLINATIONS.AI - Fallback 1 (Free, no key needed)
-// ═══════════════════════════════════════════════════════════════════
-const POLLINATIONS_MODELS = ['flux', 'turbo', null];
-
-async function generateWithPollinations(cleanPrompt, width = 1280, height = 720, modelIndex = 0) {
-  const model = POLLINATIONS_MODELS[modelIndex];
-  const fullPrompt = `${QUALITY_PREFIX}, ${cleanPrompt}, ${QUALITY_SUFFIX}`;
-  const encoded = encodeURIComponent(fullPrompt);
-  const seed = Math.floor(Math.random() * 999999);
-
-  let url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
-  if (model) url += `&model=${model}`;
-
-  const modelLabel = model || 'default';
-  logger.api(`Pollinations [${modelLabel}]: "${cleanPrompt.substring(0, 50)}..."`);
-
-  const response = await axios.get(url, {
-    responseType: 'arraybuffer',
-    timeout: 90000,
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Referer': 'https://pollinations.ai/',
-      'Accept': 'image/*'
-    }
-  });
-
   const buffer = Buffer.from(response.data);
+
+  // لو رجع JSON بدل صورة = خطا
+  const contentType = response.headers['content-type'] || '';
+  if (contentType.includes('application/json')) {
+    const json = JSON.parse(buffer.toString());
+    throw new Error(`HuggingFace API error: ${json.error || JSON.stringify(json)}`);
+  }
+
   if (buffer.byteLength < 5000) throw new Error(`Image too small (${buffer.byteLength} bytes)`);
 
-  const filePath = path.join(TEMP_DIR, `img_poll_${Date.now()}.jpg`);
+  const filePath = path.join(TEMP_DIR, `img_hf_${Date.now()}.jpg`);
   await fs.writeFile(filePath, buffer);
-  logger.success('IMG', `✅ Pollinations [${modelLabel}] → ${path.basename(filePath)}`);
+  logger.success('IMG', `HuggingFace [${model.split('/')[1]}] -> ${path.basename(filePath)}`);
   return filePath;
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// 3. PRODIA - Fallback 2 (Free key at prodia.com)
-// ═══════════════════════════════════════════════════════════════════
-async function generateWithProdia(cleanPrompt) {
-  const apiKey = process.env.PRODIA_API_KEY;
-  if (!apiKey) throw new Error('PRODIA_API_KEY not set');
-
-  const fullPrompt = `${QUALITY_PREFIX}, ${cleanPrompt}, ${QUALITY_SUFFIX}`;
-  logger.api('Prodia: generating...');
-
-  const job = await axios.get('https://api.prodia.com/v1/sdxl/generate', {
-    params: {
-      model: 'dreamshaperXL10_alpha2',
-      prompt: fullPrompt,
-      negative_prompt: 'cartoon, anime, blurry, text, watermark, signature',
-      width: 1024,
-      height: 576,
-      steps: 20,
-      cfg_scale: 7
-    },
-    headers: { 'X-Prodia-Key': apiKey },
-    timeout: 30000
-  });
-
-  const jobId = job.data.job;
-  for (let i = 0; i < 30; i++) {
-    await new Promise(r => setTimeout(r, 3000));
-    const status = await axios.get(`https://api.prodia.com/v1/job/${jobId}`, {
-      headers: { 'X-Prodia-Key': apiKey },
-      timeout: 15000
-    });
-
-    if (status.data.status === 'succeeded') {
-      const imgRes = await axios.get(status.data.imageUrl, { responseType: 'arraybuffer', timeout: 30000 });
-      const buffer = Buffer.from(imgRes.data);
-      const filePath = path.join(TEMP_DIR, `img_prodia_${Date.now()}.png`);
-      await fs.writeFile(filePath, buffer);
-      logger.success('IMG', `✅ Prodia → ${path.basename(filePath)}`);
-      return filePath;
-    }
-  }
-  throw new Error('Prodia timeout');
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// 4. STABLE HORDE - Fallback 3 (Always free, may be slow)
-// ═══════════════════════════════════════════════════════════════════
+// ===================================================================
+// 2. STABLE HORDE - Fallback (Always free, slow)
+// ===================================================================
 const HORDE_ANON_KEY = '0000000000';
 const HORDE_MODELS = ['Realistic Vision v6.0 B1', 'Deliberate 3.0', 'dreamshaper_8'];
 
@@ -204,7 +146,7 @@ async function generateWithStableHorde(cleanPrompt, width = 1280, height = 704) 
       const buffer = Buffer.from(imgRes.data);
       const filePath = path.join(TEMP_DIR, `img_horde_${Date.now()}.webp`);
       await fs.writeFile(filePath, buffer);
-      logger.success('IMG', `✅ Stable Horde → ${path.basename(filePath)}`);
+      logger.success('IMG', `Stable Horde -> ${path.basename(filePath)}`);
       return filePath;
     }
 
@@ -213,45 +155,29 @@ async function generateWithStableHorde(cleanPrompt, width = 1280, height = 704) 
   throw new Error('Stable Horde timeout (5 minutes)');
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// MAIN EXPORT - Full fallback chain
-// Priority: Gemini ✅ → Pollinations → Prodia → Stable Horde
-// ═══════════════════════════════════════════════════════════════════
+// ===================================================================
+// MAIN EXPORT
+// HuggingFace FLUX schnell -> HuggingFace FLUX dev -> Stable Horde
+// ===================================================================
 export async function generateImageFromPrompt(rawPrompt, width = 1280, height = 720) {
   const cleanPrompt = sanitizePrompt(rawPrompt) || 'historical scene, dramatic lighting, cinematic';
   logger.api(`Generating image for: "${cleanPrompt.substring(0, 60)}..."`);
 
-  // 1. ✅ Gemini - الأفضل والأسرع
-  try {
-    return await generateWithGemini(cleanPrompt);
-  } catch (err) {
-    if (err.message.includes('not set')) {
-      logger.warn('IMG', '⚠️  GEMINI_API_KEY غير موجود في .env - جارٍ تجربة البدائل');
-    } else {
-      logger.warn('IMG', `Gemini failed: ${err.message}`);
-    }
-  }
-
-  // 2. Pollinations - جرب كل النماذج
-  for (let i = 0; i < POLLINATIONS_MODELS.length; i++) {
+  // 1 + 2. HuggingFace - schnell ثم dev
+  for (let i = 0; i < HF_MODELS.length; i++) {
     try {
-      return await generateWithPollinations(cleanPrompt, width, height, i);
+      return await generateWithHuggingFace(cleanPrompt, i);
     } catch (err) {
-      logger.warn('IMG', `Pollinations[${POLLINATIONS_MODELS[i] || 'default'}] failed: ${err.message}`);
-      await new Promise(r => setTimeout(r, 1500));
+      if (err.message.includes('not set')) {
+        logger.warn('IMG', 'HF_API_TOKEN not in .env - trying Stable Horde');
+        break;
+      }
+      logger.warn('IMG', `HuggingFace [${HF_MODELS[i].split('/')[1]}] failed: ${err.message}`);
+      await new Promise(r => setTimeout(r, 2000));
     }
   }
 
-  // 3. Prodia - إذا في API key
-  try {
-    return await generateWithProdia(cleanPrompt);
-  } catch (err) {
-    if (!err.message.includes('not set')) {
-      logger.warn('IMG', `Prodia failed: ${err.message}`);
-    }
-  }
-
-  // 4. Stable Horde - آخر خيار (مجاني دائماً لكن بطيء)
+  // 3. Stable Horde - اخر خيار
   try {
     logger.api('Trying Stable Horde (free, may take 1-3 min)...');
     return await generateWithStableHorde(cleanPrompt, width, height);
@@ -259,7 +185,7 @@ export async function generateImageFromPrompt(rawPrompt, width = 1280, height = 
     logger.warn('IMG', `Stable Horde failed: ${err.message}`);
   }
 
-  throw new Error('❌ فشل توليد الصورة من جميع المصادر. تحقق من الاتصال أو أضف GEMINI_API_KEY في .env');
+  throw new Error('Failed to generate image. Please add HF_API_TOKEN to Render environment variables.');
 }
 
 export async function generateVideoFromImage(imagePath) {
