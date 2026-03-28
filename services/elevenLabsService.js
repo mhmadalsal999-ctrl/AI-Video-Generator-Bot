@@ -133,17 +133,21 @@ async function generateWithEdgeTTS(text, language) {
   const filePath = path.join(TEMP_DIR, `audio_edge_${Date.now()}.mp3`);
   logger.api(`EdgeTTS: voice=${voice}`);
 
-  // تثبيت edge-tts اذا مو موجود
   try {
-    await execFileAsync('edge-tts', ['--version']).catch(async () => {
-      await execFileAsync('pip', ['install', 'edge-tts', '--break-system-packages', '-q']);
-    });
+    // تثبيت edge-tts اذا مو موجود (يشتغل عبر Python module على Render)
+    try {
+      await execFileAsync('python3', ['-m', 'edge_tts', '--version'], { timeout: 10000 });
+    } catch {
+      logger.api('Installing edge-tts via pip...');
+      await execFileAsync('pip3', ['install', 'edge-tts', '--break-system-packages', '-q'], { timeout: 60000 });
+    }
 
-    await execFileAsync('edge-tts', [
+    await execFileAsync('python3', [
+      '-m', 'edge_tts',
       '--voice', voice,
       '--text', text.substring(0, 3000),
       '--write-media', filePath
-    ], { timeout: 60000 });
+    ], { timeout: 90000 });
 
     const stat = await fs.stat(filePath);
     if (stat.size < 1000) throw new Error('EdgeTTS: file too small');
